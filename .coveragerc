@@ -1,0 +1,34 @@
+[report]
+omit =
+    *__init__.py
+    __pycache__
+    tests*
+    .idea/*
+    apollo/orm/abstracts/*
+    apollo/utils/*
+    apollo/domains/models/entities/*
+
+[run]
+relative_files = True
+omit =
+    *__init__.py
+    __pycache__
+    test/*
+    .idea/*
+    apollo/orm/abstracts/*
+    apollo/utils/*
+    apollo/domains/models/entities/*
+
+[coverage:run]
+relative_files = True
+omit =
+    *__init__.py
+    __pycache__
+    test*
+    idea/*.
+    apollo/orm/abstracts/*
+    apollo/utils/*
+    apollo/domains/models/entities/*
+
+[xml]
+output = coverage.xml
