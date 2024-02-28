@@ -1,6 +1,11 @@
 .idea/
 venv/
-*__pycache__/
-*.pyc
+**__pycache__/
+**.pyc
 .coverage
 htmlcov/
+dist/
+build/
+**.egg-info/
+**.egg
+**.egg-info
