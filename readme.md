@@ -7,7 +7,7 @@ This is the Apollo ORM library for ScyllaDB, a Python library that provides an O
 You can install the Apollo ORM library via pip:
 
 ```bash
-pip install apollo_orm
+pip install apollo-orm
 ```
 
 ## Usage
