@@ -1,6 +1,6 @@
 from boto3 import client
 from moto import mock_aws
-from apollo.orm.credentials.secrets_manager_credential_service import SecretsManagerCredentialService
+from apollo_orm.orm.credentials.secrets_manager_credential_service import SecretsManagerCredentialService
 
 
 @mock_aws()

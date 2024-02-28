@@ -6,12 +6,12 @@ from cassandra.cluster import Cluster, Session
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.connection import ConnectionException
 
-from apollo.domains.models.entities.column.entity import Column
-from apollo.domains.models.entities.table_config.entity import TableConfig
-from apollo.orm.scylla import ScyllaService, ScyllaException, _generate_pre_statement_labels, _text_to_hash, \
+from apollo_orm.domains.models.entities.column.entity import Column
+from apollo_orm.domains.models.entities.table_config.entity import TableConfig
+from apollo_orm.orm.scylla import ScyllaService, ScyllaException, _generate_pre_statement_labels, _text_to_hash, \
     _column_name_to_hash, _type_validate
-from apollo.domains.models.entities.connection_config.entity import ConnectionConfig
-from apollo.domains.models.entities.credentials.entity import Credentials
+from apollo_orm.domains.models.entities.connection_config.entity import ConnectionConfig
+from apollo_orm.domains.models.entities.credentials.entity import Credentials
 
 
 class TestScyllaService(unittest.TestCase):

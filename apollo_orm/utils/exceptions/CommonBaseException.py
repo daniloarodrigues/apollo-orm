@@ -1,4 +1,4 @@
-from apollo.utils.logger.logger import Logger
+from apollo_orm.utils.logger.logger import Logger
 
 
 class CommonBaseException(Exception):

@@ -1,6 +1,6 @@
 from abc import ABC
 
-from apollo.domains.models.entities.credentials.entity import Credentials
+from apollo_orm.domains.models.entities.credentials.entity import Credentials
 
 
 class ICredential(ABC):

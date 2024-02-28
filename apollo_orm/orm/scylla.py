@@ -11,11 +11,11 @@ from cassandra.cluster import Cluster, Session
 from cassandra.connection import ConnectionException
 from cassandra.query import PreparedStatement
 
-from apollo.domains.models.entities.column.entity import Column
-from apollo.domains.models.entities.connection_config.entity import ConnectionConfig
-from apollo.domains.models.entities.table_config.entity import TableConfig
-from apollo.orm.abstracts.idatabase import IDatabaseService, DatabaseException
-from apollo.utils.logger.logger import Logger
+from apollo_orm.domains.models.entities.column.entity import Column
+from apollo_orm.domains.models.entities.connection_config.entity import ConnectionConfig
+from apollo_orm.domains.models.entities.table_config.entity import TableConfig
+from apollo_orm.orm.abstracts.idatabase import IDatabaseService, DatabaseException
+from apollo_orm.utils.logger.logger import Logger
 
 
 class ScyllaException(DatabaseException):

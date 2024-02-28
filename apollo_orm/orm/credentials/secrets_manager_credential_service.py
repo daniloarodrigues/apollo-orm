@@ -3,8 +3,8 @@ from typing import Optional
 
 from boto3 import client as aws_client
 
-from apollo.domains.models.entities.credentials.entity import Credentials
-from apollo.orm.abstracts.icredential import ICredential
+from apollo_orm.domains.models.entities.credentials.entity import Credentials
+from apollo_orm.orm.abstracts.icredential import ICredential
 
 
 class SecretsManagerCredentialService(ICredential):

@@ -1,6 +1,6 @@
 from typing import List
 
-from apollo.domains.models.entities.credentials.entity import Credentials
+from apollo_orm.domains.models.entities.credentials.entity import Credentials
 
 
 class ConnectionConfig:

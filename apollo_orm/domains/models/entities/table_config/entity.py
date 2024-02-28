@@ -1,6 +1,6 @@
 from typing import List
 
-from apollo.domains.models.entities.column.entity import Column
+from apollo_orm.domains.models.entities.column.entity import Column
 
 
 class TableConfig:

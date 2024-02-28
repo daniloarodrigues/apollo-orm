@@ -4,9 +4,9 @@ omit =
     __pycache__
     tests*
     .idea/*
-    apollo/orm/abstracts/*
-    apollo/utils/*
-    apollo/domains/models/entities/*
+    apollo_orm/orm/abstracts/*
+    apollo_orm/utils/*
+    apollo_orm/domains/models/entities/*
 
 [run]
 relative_files = True
@@ -15,9 +15,9 @@ omit =
     __pycache__
     test/*
     .idea/*
-    apollo/orm/abstracts/*
-    apollo/utils/*
-    apollo/domains/models/entities/*
+    apollo_orm/orm/abstracts/*
+    apollo_orm/utils/*
+    apollo_orm/domains/models/entities/*
 
 [coverage:run]
 relative_files = True
@@ -26,9 +26,9 @@ omit =
     __pycache__
     test*
     idea/*.
-    apollo/orm/abstracts/*
-    apollo/utils/*
-    apollo/domains/models/entities/*
+    apollo_orm/orm/abstracts/*
+    apollo_orm/utils/*
+    apollo_orm/domains/models/entities/*
 
 [xml]
 output = coverage.xml

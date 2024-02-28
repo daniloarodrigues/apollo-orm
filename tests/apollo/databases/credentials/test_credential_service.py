@@ -1,4 +1,4 @@
-from apollo.orm.credentials.credential_service import CredentialService
+from apollo_orm.orm.credentials.credential_service import CredentialService
 
 
 def test_credential_service():

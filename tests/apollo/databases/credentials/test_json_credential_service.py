@@ -1,4 +1,4 @@
-from apollo.orm.credentials.json_credential_service import JsonCredentialService
+from apollo_orm.orm.credentials.json_credential_service import JsonCredentialService
 
 
 def test_json_credentials_service():

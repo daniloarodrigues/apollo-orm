@@ -1,10 +1,10 @@
 from abc import ABC
 from typing import Optional, List, Dict, Any
 
-from apollo.domains.models.entities.column.entity import Column
-from apollo.domains.models.entities.table_config.entity import TableConfig
-from apollo.utils.exceptions.CommonBaseException import CommonBaseException
-from apollo.utils.logger.logger import Logger
+from apollo_orm.domains.models.entities.column.entity import Column
+from apollo_orm.domains.models.entities.table_config.entity import TableConfig
+from apollo_orm.utils.exceptions.CommonBaseException import CommonBaseException
+from apollo_orm.utils.logger.logger import Logger
 
 
 class DatabaseException(CommonBaseException):
