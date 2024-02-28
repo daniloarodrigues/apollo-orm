@@ -9,8 +9,6 @@ from typing import Dict, Optional, List, Any
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster, Session
 from cassandra.connection import ConnectionException
-from cassandra.cqltypes import Int32Type, UTF8Type, BooleanType, UUIDType, TimestampType, FloatType, DoubleType, \
-    SetType, ListType, MapType
 from cassandra.query import PreparedStatement
 
 from apollo.domains.models.entities.column.entity import Column
@@ -74,6 +72,10 @@ def _type_validate(column: Column, hashed_columns: Dict[str, Any], type_process:
         if column.kind == "partition_key" or column.kind == "clustering":
             return Column(column.hash_id, column.name, column.kind, column.type,
                           _parse_to_cassandra_type(hashed_columns[column.hash_id], column.type))
+
+
+def _filter_kind(columns: List[Column], kind: str) -> list[Column]:
+    return [column for column in columns if column.kind == kind]
 
 
 class ScyllaService(IDatabaseService):
@@ -175,12 +177,9 @@ class ScyllaService(IDatabaseService):
             self._check_clustering_columns(filtered_columns, table_name)
         return filtered_columns
 
-    def _filter_kind(self, columns: List[Column], kind: str) -> list[Column]:
-        return [column for column in columns if column.kind == kind]
-
     def _check_partition_key_columns(self, columns: Dict[str, Column], table_name: str) -> None:
         non_regular_columns = self._table_config[self._connection_config.tables.index(table_name)].columns
-        filtered = self._filter_kind(non_regular_columns, "partition_key")
+        filtered = _filter_kind(non_regular_columns, "partition_key")
         pendent_columns = []
         for column in filtered:
             if column.hash_id not in columns and column.kind == "partition_key":
@@ -192,7 +191,7 @@ class ScyllaService(IDatabaseService):
 
     def _check_clustering_columns(self, columns: Dict[str, Column], table_name: str) -> None:
         non_regular_columns = self._table_config[self._connection_config.tables.index(table_name)].columns
-        filtered = self._filter_kind(non_regular_columns, "clustering")
+        filtered = _filter_kind(non_regular_columns, "clustering")
         pendent_columns = []
         for column in filtered:
             if column.hash_id not in columns and column.kind == "clustering":

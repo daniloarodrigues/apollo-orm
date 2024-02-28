@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0", "cassandra-driver"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apollo-orm"
+version = "0.0.1"
+authors = [
+    { name="Danilo Rodrigues", email="daniloarodrigues@outlook.com" },
+]
+description = "Versão beta do ORM cassandra/scylla"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Development Status :: 4 - Beta",
+    "Topic :: Database :: Database Engines/Servers",
+]
+
+[project.urls]
+Homepage = "https://github.com/daniloarodrigues/apollo-orm"
+Issues = "https://github.com/daniloarodrigues/apollo-orm/issues"
