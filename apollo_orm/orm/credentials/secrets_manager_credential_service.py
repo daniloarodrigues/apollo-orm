@@ -9,7 +9,7 @@ from apollo_orm.orm.abstracts.icredential import ICredential
 
 class SecretsManagerCredentialService(ICredential):
 
-    def __init__(self, endpoint_url: Optional[str] = None):
+    def __init__(self, endpoint_url: Optional[str] = None, **kwargs):
         self.endpoint_url = endpoint_url
 
         self.sm = (aws_client("secretsmanager") if endpoint_url is None

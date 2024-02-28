@@ -2,7 +2,7 @@ import hashlib
 import json
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 
 from typing import Dict, Optional, List, Any
 
@@ -46,22 +46,39 @@ def _column_name_to_hash(parameters: Any) -> Dict[str, Any]:
 
 
 def _parse_to_cassandra_type(value: Any, cassandra_type: str) -> Any:
-    if cassandra_type == "uuid":
+    if cassandra_type in ["uuid", "timeuuid"]:
         return uuid.UUID(value)
-    elif cassandra_type == "timeuuid":
-        return uuid.UUID(value)
-    elif cassandra_type == "boolean":
-        return value
-    elif cassandra_type == "text":
+    elif cassandra_type in ["boolean", "text", "int", "bigint"]:
         return value
     elif cassandra_type == "timestamp":
-        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f")
-    elif cassandra_type == "int" or cassandra_type == "bigint":
+        _timestamp_validate(value)
+    elif cassandra_type == "date":
+        _date_validate(value)
+    elif cassandra_type == "time" and isinstance(value, datetime):
         return value
-    elif cassandra_type == "float" or cassandra_type == "double":
+    elif cassandra_type in ["float", "double"]:
         return float(value)
     else:
         raise ScyllaException(f"Type {cassandra_type} not supported")
+
+
+def _timestamp_validate(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    elif isinstance(value, str):
+        if re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", value):
+            return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        elif re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z", value):
+            return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ")
+        elif re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value):
+            return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+
+
+def _date_validate(value: Any) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    elif isinstance(value, str) and re.match(r"\d{4}-\d{2}-\d{2}", value):
+        return datetime.strptime(value, "%Y-%m-%d").date()
 
 
 def _type_validate(column: Column, hashed_columns: Dict[str, Any], type_process: str) -> Column:
