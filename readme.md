@@ -26,19 +26,18 @@ data = {
 }
 
 # Initialize the Credentials
-credentials = CredentialService({
-    "username": "username",
-    "password": "password",
-    "hosts": ["host1", "host2"],
-    "port": "port",
-    "keyspace_name": "keyspace"
-})
+credentials = CredentialService(
+    ["localhost1", "localhost2", "localhost3"],
+    9042,
+    "user",
+    "password",
+    "keyspace_name"
+).credential()
 
 # Initialize the ConnectionConfig
-connection_config = ConnectionConfig({
-    "credentials": credentials,
-    "tables": ["table_name1", "table_name2"]
-})
+connection_config = ConnectionConfig(
+    credentials,
+    ["table_name1", "table_name2"])
 
 # Initialize the ScyllaService
 scylla_service = ScyllaService(connection_config)
