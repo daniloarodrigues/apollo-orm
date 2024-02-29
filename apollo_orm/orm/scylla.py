@@ -9,6 +9,7 @@ from typing import Dict, Optional, List, Any
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster, Session
 from cassandra.connection import ConnectionException
+from cassandra.policies import RoundRobinPolicy
 from cassandra.query import PreparedStatement
 
 from apollo_orm.domains.models.entities.column.entity import Column
@@ -131,7 +132,8 @@ class ScyllaService(IDatabaseService):
                     contact_points=self._connection_config.credential.hosts,
                     port=self._connection_config.credential.port,
                     auth_provider=auth_provider,
-                    protocol_version=4
+                    protocol_version=4,
+                    load_balancing_policy=RoundRobinPolicy()
                 )
                 self.session = self.cluster.connect()
                 self._scan_tables()
