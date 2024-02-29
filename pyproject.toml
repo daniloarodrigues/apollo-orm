@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "cassandra-driver"]
+requires = ["scylla-driver"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "apollo-orm"
-version = "0.0.8"
+version = "0.0.9"
 authors = [
     { name="Danilo Rodrigues", email="daniloarodrigues@outlook.com" },
 ]
