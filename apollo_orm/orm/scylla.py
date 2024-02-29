@@ -52,9 +52,9 @@ def _parse_to_cassandra_type(value: Any, cassandra_type: str) -> Any:
     elif cassandra_type in ["boolean", "text", "int", "bigint"]:
         return value
     elif cassandra_type == "timestamp":
-        _timestamp_validate(value)
+        return _timestamp_validate(value)
     elif cassandra_type == "date":
-        _date_validate(value)
+        return _date_validate(value)
     elif cassandra_type == "time" and isinstance(value, datetime):
         return value
     elif cassandra_type in ["float", "double"]:

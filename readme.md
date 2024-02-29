@@ -1,6 +1,6 @@
 # Apollo ORM for ScyllaDB
 
-This is the Apollo ORM library for ScyllaDB, a Python library that provides an Object-Relational Mapping (ORM) interface to ScyllaDB.
+This is the Apollo ORM library for ScyllaDB/Cassandra, a Python library that provides an Object-Relational Mapping (ORM) interface to ScyllaDB.
 
 ## Installation
 

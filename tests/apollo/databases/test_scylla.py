@@ -369,6 +369,5 @@ class TestScyllaService(unittest.TestCase):
         self.assertEqual(date_test_six, datetime.datetime(2024, 2, 29, 0, 0, 13, 895000))
 
 
-
 if __name__ == '__main__':
     unittest.main()
