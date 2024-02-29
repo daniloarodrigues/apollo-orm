@@ -9,3 +9,5 @@ build/
 **.egg-info/
 **.egg
 **.egg-info
+**/misc.xml
+apollo-orm.iml
