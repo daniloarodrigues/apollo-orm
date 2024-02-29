@@ -72,6 +72,12 @@ def _timestamp_validate(value: Any) -> datetime:
             return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ")
         elif re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value):
             return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+        elif re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}", value):
+            return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f")
+        elif re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", value):
+            return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S")
+        elif re.match(r"\d{4}-\d{2}-\d{2}", value):
+            return datetime.strptime(value, "%Y-%m-%d")
 
 
 def _date_validate(value: Any) -> date:

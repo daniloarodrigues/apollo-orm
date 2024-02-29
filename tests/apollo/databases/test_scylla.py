@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import re
 import unittest
@@ -9,7 +10,7 @@ from cassandra.connection import ConnectionException
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.table_config.entity import TableConfig
 from apollo_orm.orm.scylla import ScyllaService, ScyllaException, _generate_pre_statement_labels, _text_to_hash, \
-    _column_name_to_hash, _type_validate
+    _column_name_to_hash, _type_validate, _timestamp_validate
 from apollo_orm.domains.models.entities.connection_config.entity import ConnectionConfig
 from apollo_orm.domains.models.entities.credentials.entity import Credentials
 
@@ -351,6 +352,22 @@ class TestScyllaService(unittest.TestCase):
         # Assert
         check_clustering_columns_mock.assert_called_once_with(dict_columns, table_name)
         scylla_service.session.prepare.assert_called_once()
+
+    def test_timestamp_validate(self):
+        date_test_one = _timestamp_validate('2024-02-28T23:48:52.232Z')
+        date_test_two = _timestamp_validate('2024-02-29T23:48:52.232Z')
+        date_test_three = _timestamp_validate('2024-02-28T23:48:52.232')
+        date_test_four = _timestamp_validate('2024-02-28T23:48:52')
+        date_test_five = _timestamp_validate('2024-02-28')
+        date_test_six = _timestamp_validate('2024-02-29T00:00:13.895Z')
+
+        self.assertEqual(date_test_one, datetime.datetime(2024, 2, 28, 23, 48, 52, 232000))
+        self.assertEqual(date_test_two, datetime.datetime(2024, 2, 29, 23, 48, 52, 232000))
+        self.assertEqual(date_test_three, datetime.datetime(2024, 2, 28, 23, 48, 52, 232000))
+        self.assertEqual(date_test_four, datetime.datetime(2024, 2, 28, 23, 48, 52))
+        self.assertEqual(date_test_five, datetime.datetime(2024, 2, 28))
+        self.assertEqual(date_test_six, datetime.datetime(2024, 2, 29, 0, 0, 13, 895000))
+
 
 
 if __name__ == '__main__':
