@@ -1,13 +1,15 @@
 import hashlib
 import json
 import re
+import time
 import uuid
+import threading
 from datetime import datetime, date
 
 from typing import Dict, Optional, List, Any
 
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster, Session
+from cassandra.cluster import Cluster, Session, HostDistance
 from cassandra.connection import ConnectionException
 from cassandra.policies import RoundRobinPolicy
 from cassandra.query import PreparedStatement
@@ -115,10 +117,14 @@ class ScyllaService(IDatabaseService):
         self._prepared_statements: Dict[str, PreparedStatement] = {}
         self.cluster: Optional[Cluster] = None
         self.session: Optional[Session] = None
+        self._semaphore = None
 
         self.connect()
 
-    def connect(self):
+    def connect(self,
+                protocol_version: int = 4,
+                load_balancing_policy=RoundRobinPolicy(),
+                parallel_execution=5) -> None:
         if self._connection_config is None:
             raise ScyllaException("Connection config is not set")
         error_message = ""
@@ -132,11 +138,13 @@ class ScyllaService(IDatabaseService):
                     contact_points=self._connection_config.credential.hosts,
                     port=self._connection_config.credential.port,
                     auth_provider=auth_provider,
-                    protocol_version=4,
-                    load_balancing_policy=RoundRobinPolicy()
+                    protocol_version=protocol_version,
+                    load_balancing_policy=load_balancing_policy,
                 )
                 self.session = self.cluster.connect()
                 self._scan_tables()
+                limit = self._get_number_of_requests()
+                self._semaphore = threading.Semaphore(limit)
                 return
             except Exception as e:
                 error_message = str(e) if str(e) else "Unknown error"
@@ -235,22 +243,33 @@ class ScyllaService(IDatabaseService):
                                     column.kind == "partition_key" or column.kind == "clustering"]
         prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "select")
         values = [dictionary_input[column.name] for column in partition_and_clustering]
+        self._semaphore.acquire()
         try:
             return self.session.execute(prepared_statement.bind(values)).all()
         except ConnectionException as e:
             self.log.error(f"Connection error: {e}")
             self.reconnect()
             return self.session.execute(prepared_statement.bind(values)).all()
+        finally:
+            self._semaphore.release()
 
     def insert(self, dictionary_input: Dict[str, Any], table_name: str) -> None:
         filtered_columns = self._filter_columns(dictionary_input, table_name, "insert")
         prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "insert")
-        self._bind_delete_or_insert(filtered_columns, prepared_statement)
+        self._semaphore.acquire()
+        try:
+            self._bind_delete_or_insert(filtered_columns, prepared_statement)
+        finally:
+            self._semaphore.release()
 
     def delete(self, dictionary_input: Dict[str, Any], table_name: str) -> None:
         filtered_columns = self._filter_columns(dictionary_input, table_name, "delete")
         prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "delete")
-        self._bind_delete_or_insert(filtered_columns, prepared_statement)
+        self._semaphore.acquire()
+        try:
+            self._bind_delete_or_insert(filtered_columns, prepared_statement)
+        finally:
+            self._semaphore.release()
 
     def _bind_delete_or_insert(self, filtered_columns: Dict[str, Column],
                                prepared_statement: PreparedStatement) -> None:
@@ -304,3 +323,12 @@ class ScyllaService(IDatabaseService):
         values = _generate_pre_statement_labels(columns)
         statement = f"delete from {keyspace}.{table_name} where {' and '.join(values.values())}"
         self._prepared_statements[hashed_name] = self.session.prepare(statement)
+
+    def _get_number_of_requests(self) -> int:
+        request_per_connection = self.cluster.get_max_requests_per_connection(host_distance=HostDistance.LOCAL)
+        max_connections = self.cluster.get_core_connections_per_host(host_distance=HostDistance.LOCAL)
+        return request_per_connection * max_connections * 0.95
+
+    def wait_for_finish(self):
+        while self._semaphore.value != self._get_number_of_requests():
+            time.sleep(200)
