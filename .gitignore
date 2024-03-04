@@ -11,3 +11,4 @@ build/
 **.egg-info
 **/misc.xml
 apollo-orm.iml
+.pyirc
