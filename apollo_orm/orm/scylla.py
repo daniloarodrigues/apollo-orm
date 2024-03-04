@@ -304,6 +304,6 @@ class ScyllaService(IDatabaseService):
         max_connections = self.cluster.get_core_connections_per_host(host_distance=HostDistance.LOCAL)
         return request_per_connection * max_connections * 0.95
 
-    def _wait_for_finish(self):
+    def wait_for_finish(self):
         while self._semaphore.value != self._get_number_of_requests():
             time.sleep(200)

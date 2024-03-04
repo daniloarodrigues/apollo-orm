@@ -17,6 +17,7 @@ def test_work_flow():
     select_table = connection.select(json_data, tables[0])
     connection.delete(json_data, tables[0])
     select_deleted_table = connection.select(json_data, tables[0])
+    connection.wait_for_finish()
 
     assert len(select_table.current_rows) == 1
     assert len(select_deleted_table.current_rows) == 0
