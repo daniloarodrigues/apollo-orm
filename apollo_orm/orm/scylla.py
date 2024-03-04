@@ -9,7 +9,7 @@ from datetime import datetime, date
 from typing import Dict, Optional, List, Any
 
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster, Session, HostDistance, ResultSet, ResponseFuture
+from cassandra.cluster import Cluster, Session, HostDistance, ResultSet, ResponseFuture, NoHostAvailable
 from cassandra.connection import ConnectionException
 from cassandra.policies import RoundRobinPolicy
 from cassandra.query import PreparedStatement
@@ -108,8 +108,10 @@ class ScyllaService(IDatabaseService):
 
     def __init__(self,
                  connection_config: ConnectionConfig,
+                 load_balancing_policy=RoundRobinPolicy(),
                  attempts: int = 5
                  ):
+        self.load_balancing_policy = load_balancing_policy
         self._connection_config = connection_config
         self._attempts = attempts
         self._table_config: Optional[List[TableConfig]] = None
@@ -121,7 +123,6 @@ class ScyllaService(IDatabaseService):
 
     def connect(self,
                 protocol_version: int = 4,
-                load_balancing_policy=RoundRobinPolicy(),
                 parallel_execution=5) -> None:
         if self._connection_config is None:
             raise ScyllaException("Connection config is not set")
@@ -137,7 +138,7 @@ class ScyllaService(IDatabaseService):
                     port=self._connection_config.credential.port,
                     auth_provider=auth_provider,
                     protocol_version=protocol_version,
-                    load_balancing_policy=load_balancing_policy,
+                    load_balancing_policy=self.load_balancing_policy,
                 )
                 self.session = self.cluster.connect()
                 self._scan_tables()
@@ -246,7 +247,7 @@ class ScyllaService(IDatabaseService):
         self._semaphore.acquire()
         try:
             return self.session.execute_async(statement.bind(values))
-        except ConnectionException as e:
+        except (NoHostAvailable, ConnectionException) as e:
             self.log.error(f"Connection error: {e}")
             self.reconnect()
             return self.session.execute_async(statement.bind(values))
@@ -260,13 +261,16 @@ class ScyllaService(IDatabaseService):
         ordered_columns = sorted(columns.values(), key=lambda x: x.name)
         hashed_name = _text_to_hash(f"{query_type}".join([column.name for column in ordered_columns]))
 
-        if hashed_name not in self._prepared_statements:
+        try:
             if query_type == "select":
                 self._prepare_read(hashed_name, ordered_columns, keyspace, table_name)
             elif query_type == "insert":
                 self._prepare_insert(hashed_name, ordered_columns, keyspace, table_name, columns)
             elif query_type == "delete":
                 self._prepare_delete(hashed_name, ordered_columns, keyspace, table_name, columns)
+        except (NoHostAvailable, ConnectionException) as e:
+            self.log.error(f"NoHostAvailable error: {e}")
+            self.reconnect()
 
         return self._prepared_statements[hashed_name]
 
