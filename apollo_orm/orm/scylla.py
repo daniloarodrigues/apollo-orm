@@ -145,7 +145,7 @@ class ScyllaService(IDatabaseService):
                 limit = self._get_number_of_requests()
                 self._semaphore = threading.Semaphore(limit)
                 return
-            except Exception as e:
+            except ConnectionException as e:
                 error_message = str(e) if str(e) else "Unknown error"
         raise ScyllaException(f"Failed to connect after {self._attempts} attempts - {error_message}")
 
@@ -202,7 +202,7 @@ class ScyllaService(IDatabaseService):
         pendent_columns = [column.__str__() for column in filtered if
                            column.hash_id not in columns and column.kind == "partition_key"]
         if pendent_columns:
-            raise DatabaseException(
+            raise ScyllaException(
                 f"""Column {pendent_columns} is not in the filtered columns.
                 All partition keys columns must be passed as parameter""")
 
@@ -212,7 +212,7 @@ class ScyllaService(IDatabaseService):
         pendent_columns = [column.__str__() for column in filtered if
                            column.hash_id not in columns and column.kind == "clustering"]
         if pendent_columns:
-            raise DatabaseException(
+            raise ScyllaException(
                 f"""Column {pendent_columns} is not in the filtered columns.
                 All clustering columns must be passed as parameter""")
 
@@ -260,18 +260,18 @@ class ScyllaService(IDatabaseService):
 
         ordered_columns = sorted(columns.values(), key=lambda x: x.name)
         hashed_name = _text_to_hash(f"{query_type}".join([column.name for column in ordered_columns]))
-
-        try:
-            if query_type == "select":
-                self._prepare_read(hashed_name, ordered_columns, keyspace, table_name)
-            elif query_type == "insert":
-                self._prepare_insert(hashed_name, ordered_columns, keyspace, table_name, columns)
-            elif query_type == "delete":
-                self._prepare_delete(hashed_name, ordered_columns, keyspace, table_name, columns)
-        except (NoHostAvailable, ConnectionException) as e:
-            self.log.error(f"NoHostAvailable error: {e}")
-            self.reconnect()
-
+        if hashed_name not in self._prepared_statements:
+            try:
+                if query_type == "select":
+                    self._prepare_read(hashed_name, ordered_columns, keyspace, table_name)
+                elif query_type == "insert":
+                    self._prepare_insert(hashed_name, ordered_columns, keyspace, table_name, columns)
+                elif query_type == "delete":
+                    self._prepare_delete(hashed_name, ordered_columns, keyspace, table_name, columns)
+            except (NoHostAvailable, ConnectionException) as e:
+                self.log.error(f"Connection error: {e}")
+                self.reconnect()
+                self._prepare_dynamic_statement(columns, table_name, query_type)
         return self._prepared_statements[hashed_name]
 
     def _prepare_read(self, hashed_name: str, columns: List[Column], keyspace: str, table_name: str) -> None:
@@ -305,5 +305,5 @@ class ScyllaService(IDatabaseService):
         return request_per_connection * max_connections * 0.95
 
     def wait_for_finish(self):
-        while self._semaphore.value != self._get_number_of_requests():
+        while self._semaphore._value != self._get_number_of_requests():
             time.sleep(200)
