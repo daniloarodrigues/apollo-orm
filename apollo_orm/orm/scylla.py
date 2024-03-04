@@ -9,7 +9,7 @@ from datetime import datetime, date
 from typing import Dict, Optional, List, Any
 
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster, Session, HostDistance
+from cassandra.cluster import Cluster, Session, HostDistance, ResultSet, ResponseFuture
 from cassandra.connection import ConnectionException
 from cassandra.policies import RoundRobinPolicy
 from cassandra.query import PreparedStatement
@@ -69,25 +69,24 @@ def _timestamp_validate(value: Any) -> datetime:
     if isinstance(value, datetime):
         return value
     elif isinstance(value, str):
-        if re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", value):
-            return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
-        elif re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z", value):
-            return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ")
-        elif re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value):
-            return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
-        elif re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}", value):
-            return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f")
-        elif re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", value):
-            return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S")
-        elif re.match(r"\d{4}-\d{2}-\d{2}", value):
-            return datetime.strptime(value, "%Y-%m-%d")
+        formats = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%f",
+                   "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"]
+        for fmt in formats:
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+    raise ValueError("No valid date format found")
 
 
 def _date_validate(value: Any) -> date:
     if isinstance(value, datetime):
         return value.date()
-    elif isinstance(value, str) and re.match(r"\d{4}-\d{2}-\d{2}", value):
-        return datetime.strptime(value, "%Y-%m-%d").date()
+    elif isinstance(value, str):
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        except ValueError:
+            raise ValueError("No valid date format found")
 
 
 def _type_validate(column: Column, hashed_columns: Dict[str, Any], type_process: str) -> Column:
@@ -118,7 +117,6 @@ class ScyllaService(IDatabaseService):
         self.cluster: Optional[Cluster] = None
         self.session: Optional[Session] = None
         self._semaphore = None
-
         self.connect()
 
     def connect(self,
@@ -157,10 +155,8 @@ class ScyllaService(IDatabaseService):
             self.cluster.shutdown()
 
     def _reload_prepared_statements(self) -> None:
-        reloaded_statements = {}
-        for name, statement in self._prepared_statements.items():
-            reloaded_statements[name] = self.session.prepare(statement.query_string)
-        self._prepared_statements = reloaded_statements
+        self._prepared_statements = {name: self.session.prepare(statement.query_string) for name, statement in
+                                     self._prepared_statements.items()}
 
     def reconnect(self) -> None:
         self.close()
@@ -171,26 +167,15 @@ class ScyllaService(IDatabaseService):
         system_schema = "system_schema.columns"
         columns_statement = "column_name, kind, type"
         where_statement = "keyspace_name = ? and table_name = ?"
-        statement = self.session.prepare(
-            f"""
-                    select {columns_statement}
-                    from {system_schema}
-                    where {where_statement}
-                    """
-        )
+        statement = self.session.prepare(f"select {columns_statement} from {system_schema} where {where_statement}")
         for table in self._connection_config.tables:
             values = [self._connection_config.credential.keyspace_name, table]
             config_rows = self.session.execute(statement.bind(values))
-            columns_list = []
-            for config_row in config_rows:
-                columns_list.append(Column(
-                    _text_to_hash(config_row.column_name),
-                    config_row.column_name,
-                    config_row.kind,
-                    config_row.type))
-                self._add_to_table_config(TableConfig(self._connection_config.credential.keyspace_name,
-                                                      table,
-                                                      columns_list))
+            columns_list = [
+                Column(_text_to_hash(config_row.column_name), config_row.column_name, config_row.kind, config_row.type)
+                for config_row in config_rows]
+            self._add_to_table_config(
+                TableConfig(self._connection_config.credential.keyspace_name, table, columns_list))
 
     def _add_to_table_config(self, table_config: TableConfig) -> None:
         if self._table_config is None:
@@ -213,74 +198,60 @@ class ScyllaService(IDatabaseService):
     def _check_partition_key_columns(self, columns: Dict[str, Column], table_name: str) -> None:
         non_regular_columns = self._table_config[self._connection_config.tables.index(table_name)].columns
         filtered = _filter_kind(non_regular_columns, "partition_key")
-        pendent_columns = []
-        for column in filtered:
-            if column.hash_id not in columns and column.kind == "partition_key":
-                pendent_columns.append(column.__str__())
+        pendent_columns = [column.__str__() for column in filtered if
+                           column.hash_id not in columns and column.kind == "partition_key"]
         if pendent_columns:
-            raise ScyllaException(
+            raise DatabaseException(
                 f"""Column {pendent_columns} is not in the filtered columns.
-                    All partition keys columns must be passed as parameter""")
+                All partition keys columns must be passed as parameter""")
 
     def _check_clustering_columns(self, columns: Dict[str, Column], table_name: str) -> None:
         non_regular_columns = self._table_config[self._connection_config.tables.index(table_name)].columns
         filtered = _filter_kind(non_regular_columns, "clustering")
-        pendent_columns = []
-        for column in filtered:
-            if column.hash_id not in columns and column.kind == "clustering":
-                pendent_columns.append(column.__str__())
+        pendent_columns = [column.__str__() for column in filtered if
+                           column.hash_id not in columns and column.kind == "clustering"]
         if pendent_columns:
-            raise ScyllaException(
+            raise DatabaseException(
                 f"""Column {pendent_columns} is not in the filtered columns.
-                    All clustering columns must be passed as parameter""")
+                All clustering columns must be passed as parameter""")
 
-    def select_from_json(self, json_input: str, table_name: str) -> List[Dict]:
+    def select_from_json(self, json_input: str, table_name: str) -> ResultSet:
         return self.select(json.loads(json_input), table_name)
 
-    def select(self, dictionary_input: Dict[str, Any], table_name: str) -> List[Dict]:
+    def select(self, dictionary_input: Dict[str, Any], table_name: str) -> ResultSet:
         filtered_columns = self._filter_columns(dictionary_input, table_name, "select")
         partition_and_clustering = [column for column in sorted(filtered_columns.values(), key=lambda x: x.name) if
                                     column.kind == "partition_key" or column.kind == "clustering"]
         prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "select")
         values = [dictionary_input[column.name] for column in partition_and_clustering]
-        self._semaphore.acquire()
-        try:
-            return self.session.execute(prepared_statement.bind(values)).all()
-        except ConnectionException as e:
-            self.log.error(f"Connection error: {e}")
-            self.reconnect()
-            return self.session.execute(prepared_statement.bind(values)).all()
-        finally:
-            self._semaphore.release()
+        return self._execute_query(prepared_statement, values).result()
 
     def insert(self, dictionary_input: Dict[str, Any], table_name: str) -> None:
         filtered_columns = self._filter_columns(dictionary_input, table_name, "insert")
         prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "insert")
-        self._semaphore.acquire()
-        try:
-            self._bind_delete_or_insert(filtered_columns, prepared_statement)
-        finally:
-            self._semaphore.release()
+        self._bind_delete_or_insert(filtered_columns, prepared_statement)
 
     def delete(self, dictionary_input: Dict[str, Any], table_name: str) -> None:
         filtered_columns = self._filter_columns(dictionary_input, table_name, "delete")
         prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "delete")
-        self._semaphore.acquire()
-        try:
-            self._bind_delete_or_insert(filtered_columns, prepared_statement)
-        finally:
-            self._semaphore.release()
+        self._bind_delete_or_insert(filtered_columns, prepared_statement)
 
     def _bind_delete_or_insert(self, filtered_columns: Dict[str, Column],
                                prepared_statement: PreparedStatement) -> None:
         values = [filtered_columns[column.hash_id].value for column in
                   sorted(filtered_columns.values(), key=lambda x: x.name)]
+        self._execute_query(prepared_statement, values)
+
+    def _execute_query(self, statement: PreparedStatement, values: List[Any]) -> ResponseFuture:
+        self._semaphore.acquire()
         try:
-            self.session.execute(prepared_statement.bind(values)).all()
+            return self.session.execute_async(statement.bind(values))
         except ConnectionException as e:
             self.log.error(f"Connection error: {e}")
             self.reconnect()
-            self.session.execute(prepared_statement.bind(values)).all()
+            return self.session.execute_async(statement.bind(values))
+        finally:
+            self._semaphore.release()
 
     def _prepare_dynamic_statement(self, columns: Dict[str, Column], table_name: str,
                                    query_type: str) -> PreparedStatement:
@@ -329,6 +300,6 @@ class ScyllaService(IDatabaseService):
         max_connections = self.cluster.get_core_connections_per_host(host_distance=HostDistance.LOCAL)
         return request_per_connection * max_connections * 0.95
 
-    def wait_for_finish(self):
+    def _wait_for_finish(self):
         while self._semaphore.value != self._get_number_of_requests():
             time.sleep(200)

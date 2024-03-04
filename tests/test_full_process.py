@@ -15,8 +15,8 @@ def test_work_flow():
     connection = ScyllaService(connection_config)
     connection.insert(json_data, tables[0])
     select_table = connection.select(json_data, tables[0])
-    assert select_table is not None
     connection.delete(json_data, tables[0])
-    select_table = connection.select(json_data, tables[0])
+    select_deleted_table = connection.select(json_data, tables[0])
 
-    assert len(select_table) == 0
+    assert len(select_table.current_rows) == 1
+    assert len(select_deleted_table.current_rows) == 0
