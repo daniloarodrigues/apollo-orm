@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import re
 import time
 import uuid
@@ -11,7 +12,7 @@ from typing import Dict, Optional, List, Any
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster, Session, HostDistance, ResultSet, ResponseFuture, NoHostAvailable
 from cassandra.connection import ConnectionException
-from cassandra.policies import RoundRobinPolicy
+from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy
 from cassandra.query import PreparedStatement
 
 from apollo_orm.domains.models.entities.column.entity import Column
@@ -108,10 +109,11 @@ class ScyllaService(IDatabaseService):
 
     def __init__(self,
                  connection_config: ConnectionConfig,
-                 load_balancing_policy=RoundRobinPolicy(),
                  attempts: int = 5
                  ):
-        self.load_balancing_policy = load_balancing_policy
+        self._policy = DCAwareRoundRobinPolicy(
+            connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
+        self._load_balancing_policy = TokenAwarePolicy(self._policy)
         self._connection_config = connection_config
         self._attempts = attempts
         self._table_config: Optional[List[TableConfig]] = None
@@ -129,6 +131,8 @@ class ScyllaService(IDatabaseService):
         error_message = ""
         for _ in range(self._attempts):
             try:
+                if self._connection_config.credential.datacenter:
+                    logging.info(f"Datacenter detected: {self._connection_config.credential.datacenter}")
                 auth_provider = PlainTextAuthProvider(
                     username=self._connection_config.credential.user,
                     password=self._connection_config.credential.password
@@ -138,7 +142,7 @@ class ScyllaService(IDatabaseService):
                     port=self._connection_config.credential.port,
                     auth_provider=auth_provider,
                     protocol_version=protocol_version,
-                    load_balancing_policy=self.load_balancing_policy,
+                    load_balancing_policy=self._load_balancing_policy,
                 )
                 self.session = self.cluster.connect()
                 self._scan_tables()
