@@ -9,7 +9,7 @@ from cassandra.connection import ConnectionException
 
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.table_config.entity import TableConfig
-from apollo_orm.orm.scylla import ScyllaService, ScyllaException, _generate_pre_statement_labels, _text_to_hash, \
+from apollo_orm.orm.scylla import ORMInstance, ScyllaException, _generate_pre_statement_labels, _text_to_hash, \
     _column_name_to_hash, _type_validate, _timestamp_validate
 from apollo_orm.domains.models.entities.connection_config.entity import ConnectionConfig
 from apollo_orm.domains.models.entities.credentials.entity import Credentials
@@ -25,7 +25,7 @@ class TestScyllaService(unittest.TestCase):
         connection_config = ConnectionConfig(credential, ['table1', 'table2'])
 
         # Act
-        ScyllaService(connection_config)
+        ORMInstance(connection_config)
 
         # Assert
         connect_mock.assert_called_once()
@@ -36,7 +36,7 @@ class TestScyllaService(unittest.TestCase):
         # Arrange
         credential = Credentials(['localhost'], 9042, 'user', 'password', 'keyspace')
         connection_config = ConnectionConfig(credential, ['table1', 'table2'])
-        scylla_service = ScyllaService(connection_config)
+        scylla_service = ORMInstance(connection_config)
         connect_mock.side_effect = Exception('Connection error')
 
         # Act & Assert
@@ -48,7 +48,7 @@ class TestScyllaService(unittest.TestCase):
         # Arrange
         credential = Credentials(['localhost'], 9042, 'user', 'password', 'keyspace')
         connection_config = ConnectionConfig(credential, ['table1', 'table2'])
-        scylla_service = ScyllaService(connection_config)
+        scylla_service = ORMInstance(connection_config)
 
         # Act
         scylla_service.close()
@@ -61,7 +61,7 @@ class TestScyllaService(unittest.TestCase):
         # Arrange
         credential = Credentials(['localhost'], 9042, 'user', 'password', 'keyspace')
         connection_config = ConnectionConfig(credential, ['table1', 'table2'])
-        scylla_service = ScyllaService(connection_config)
+        scylla_service = ORMInstance(connection_config)
 
         # Act
         scylla_service.reconnect()
@@ -147,7 +147,7 @@ class TestScyllaService(unittest.TestCase):
         # Assert
         self.assertIsNone(result)
 
-    @patch.object(ScyllaService, '_scan_tables')
+    @patch.object(ORMInstance, '_scan_tables')
     @patch('cassandra.cluster.Cluster.connect')
     def test_scan_tables_called_on_init(self, connect_mock, scan_tables_mock):
         # Arrange
@@ -155,15 +155,15 @@ class TestScyllaService(unittest.TestCase):
         connection_config = ConnectionConfig(credential, ['table1', 'table2'])
 
         # Act
-        ScyllaService(connection_config)
+        ORMInstance(connection_config)
 
         # Assert
         scan_tables_mock.assert_called_once()
 
-    @patch.object(ScyllaService, '__init__', return_value=None)
+    @patch.object(ORMInstance, '__init__', return_value=None)
     def test_connect_no_config(self, init_mock):
         # Arrange
-        scylla_service = ScyllaService()
+        scylla_service = ORMInstance()
         scylla_service._connection_config = None
 
         # Act & Assert
@@ -172,10 +172,10 @@ class TestScyllaService(unittest.TestCase):
 
         self.assertIn("Connection config is not set", str(context.exception))
 
-    @patch.object(ScyllaService, '__init__', return_value=None)
+    @patch.object(ORMInstance, '__init__', return_value=None)
     def test_reload_prepared_statements(self, init_mock):
         # Arrange
-        scylla_service = ScyllaService()
+        scylla_service = ORMInstance()
         scylla_service._prepared_statements = {'statement1': MagicMock(query_string='query1'),
                                                'statement2': MagicMock(query_string='query2')}
         scylla_service.session = MagicMock()
@@ -187,10 +187,10 @@ class TestScyllaService(unittest.TestCase):
         scylla_service.session.prepare.assert_any_call('query1')
         scylla_service.session.prepare.assert_any_call('query2')
 
-    @patch.object(ScyllaService, '__init__', return_value=None)
+    @patch.object(ORMInstance, '__init__', return_value=None)
     def test_add_to_table_config(self, init_mock):
         # Arrange
-        scylla_service = ScyllaService()
+        scylla_service = ORMInstance()
         table_config = TableConfig('keyspace', 'table', [])
 
         # Act
@@ -199,10 +199,10 @@ class TestScyllaService(unittest.TestCase):
         # Assert
         self.assertEqual(scylla_service._table_config, [table_config])
 
-    @patch.object(ScyllaService, '__init__', return_value=None)
+    @patch.object(ORMInstance, '__init__', return_value=None)
     def test_scan_tables(self, init_mock):
         # Arrange
-        scylla_service = ScyllaService()
+        scylla_service = ORMInstance()
         scylla_service._connection_config = MagicMock(tables=['table1', 'table2'])
         scylla_service.session = MagicMock()
         mock_config_row = MagicMock(column_name='column1', kind='kind1', type='type1')
@@ -220,10 +220,10 @@ class TestScyllaService(unittest.TestCase):
             self.assertEqual(column.kind, 'kind1')
             self.assertEqual(column.type, 'type1')
 
-    @patch.object(ScyllaService, '__init__', return_value=None)
+    @patch.object(ORMInstance, '__init__', return_value=None)
     def test_check_partition_key_columns(self, init_mock):
         # Arrange
-        scylla_service = ScyllaService()
+        scylla_service = ORMInstance()
         scylla_service._connection_config = ConnectionConfig(MagicMock(), ['table1'])
         scylla_service._table_config = [TableConfig('keyspace', 'table1', [
             Column('hash1', 'name1', 'partition_key', 'type1'),
@@ -243,10 +243,10 @@ class TestScyllaService(unittest.TestCase):
             scylla_service._check_partition_key_columns(columns, 'table1')
         self.assertIn("All partition keys columns must be passed as parameter", str(context.exception))
 
-    @patch.object(ScyllaService, '__init__', return_value=None)
+    @patch.object(ORMInstance, '__init__', return_value=None)
     def test_check_clustering_columns(self, init_mock):
         # Arrange
-        scylla_service = ScyllaService()
+        scylla_service = ORMInstance()
         scylla_service._connection_config = ConnectionConfig(MagicMock(), ['table1'])
         scylla_service._table_config = [TableConfig('keyspace', 'table1', [
             Column('hash1', 'name1', 'clustering', 'type1'),
@@ -266,11 +266,11 @@ class TestScyllaService(unittest.TestCase):
             scylla_service._check_clustering_columns(columns, 'table1')
         self.assertIn("All clustering columns must be passed as parameter", str(context.exception))
 
-    @patch.object(ScyllaService, '__init__', return_value=None)
-    @patch.object(ScyllaService, 'select')
+    @patch.object(ORMInstance, '__init__', return_value=None)
+    @patch.object(ORMInstance, 'select')
     def test_select_from_json(self, select_mock, init_mock):
         # Arrange
-        scylla_service = ScyllaService()
+        scylla_service = ORMInstance()
         json_input = '{"key1": "value1", "key2": "value2"}'
         table_name = 'table1'
         expected_dict = {"key1": "value1", "key2": "value2"}
@@ -281,11 +281,11 @@ class TestScyllaService(unittest.TestCase):
         # Assert
         select_mock.assert_called_once_with(expected_dict, table_name)
 
-    @patch.object(ScyllaService, '__init__', return_value=None)
-    @patch.object(ScyllaService, '_filter_columns')
+    @patch.object(ORMInstance, '__init__', return_value=None)
+    @patch.object(ORMInstance, '_filter_columns')
     def test_select(self, filter_columns_mock, init_mock):
         # Arrange
-        scylla_service = ScyllaService()
+        scylla_service = ORMInstance()
         scylla_service.session = MagicMock()
         scylla_service.log = MagicMock()
         scylla_service.reconnect = MagicMock()
@@ -307,11 +307,11 @@ class TestScyllaService(unittest.TestCase):
         scylla_service._prepare_dynamic_statement.assert_called_once_with(filtered_columns, table_name, "select")
         prepared_statement_mock.bind.assert_called_once_with(['value1', 'value2'])
 
-    @patch.object(ScyllaService, '__init__', return_value=None)
-    @patch.object(ScyllaService, '_filter_columns')
+    @patch.object(ORMInstance, '__init__', return_value=None)
+    @patch.object(ORMInstance, '_filter_columns')
     def test_select_connection_exception(self, filter_columns_mock, init_mock):
         # Arrange
-        scylla_service = ScyllaService()
+        scylla_service = ORMInstance()
         scylla_service.session = MagicMock()
         scylla_service.log = MagicMock()
         scylla_service.reconnect = MagicMock()
@@ -333,11 +333,11 @@ class TestScyllaService(unittest.TestCase):
         scylla_service.reconnect.assert_called_once()
         scylla_service.log.error.assert_called_once_with('Connection error: Connection error')
 
-    @patch.object(ScyllaService, '__init__', return_value=None)
-    @patch.object(ScyllaService, '_check_clustering_columns')
+    @patch.object(ORMInstance, '__init__', return_value=None)
+    @patch.object(ORMInstance, '_check_clustering_columns')
     def test_prepare_delete(self, check_clustering_columns_mock, init_mock):
         # Arrange
-        scylla_service = ScyllaService()
+        scylla_service = ORMInstance()
         scylla_service.session = MagicMock()
         hashed_name = 'hashed_name'
         columns = [Column('hash1', 'name1', 'partition_key', 'type1'),

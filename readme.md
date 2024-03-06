@@ -15,7 +15,7 @@ pip install apollo-orm
 Here's a basic example of how to use the Apollo ORM library:
 
 ```python
-from apollo_orm.orm.scylla import ScyllaService
+from apollo_orm.orm.scylla import ORMInstance
 from apollo_orm.domains.models.entities.connection_config.entity import ConnectionConfig
 from apollo_orm.orm.credentials.credential_service import CredentialService
 
@@ -40,7 +40,7 @@ connection_config = ConnectionConfig(
     ["table_name1", "table_name2"])
 
 # Initialize the ScyllaService
-scylla_service = ScyllaService(connection_config)
+scylla_service = ORMInstance(connection_config)
 
 # Insert data into a table
 scylla_service.insert(data, "table_name1")

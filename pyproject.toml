@@ -1,14 +1,14 @@
 [build-system]
-requires = ["setuptools>=61.0","scylla-driver"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "apollo-orm"
-version = "0.1.6"
+version = "0.1.8"
 authors = [
     { name="Danilo Rodrigues", email="daniloarodrigues@outlook.com" },
 ]
-description = "ORM Scylla/Cassandra beta version"
+description = "ORM Cassandra/Scylla beta version"
 readme = "README.md"
 requires-python = ">=3.9"
 classifiers = [

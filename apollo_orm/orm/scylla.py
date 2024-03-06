@@ -10,7 +10,7 @@ from datetime import datetime, date
 from typing import Dict, Optional, List, Any
 
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster, Session, HostDistance, ResultSet, ResponseFuture, NoHostAvailable
+from cassandra.cluster import Cluster, Session, HostDistance, ResultSet, NoHostAvailable
 from cassandra.connection import ConnectionException
 from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy
 from cassandra.query import PreparedStatement
@@ -104,7 +104,7 @@ def _filter_kind(columns: List[Column], kind: str) -> list[Column]:
     return [column for column in columns if column.kind == kind]
 
 
-class ScyllaService(IDatabaseService):
+class ORMInstance(IDatabaseService):
     log = Logger("ScyllaService")
 
     def __init__(self,
@@ -224,22 +224,34 @@ class ScyllaService(IDatabaseService):
         return self.select(json.loads(json_input), table_name)
 
     def select(self, dictionary_input: Dict[str, Any], table_name: str) -> ResultSet:
-        filtered_columns = self._filter_columns(dictionary_input, table_name, "select")
-        partition_and_clustering = [column for column in sorted(filtered_columns.values(), key=lambda x: x.name) if
-                                    column.kind == "partition_key" or column.kind == "clustering"]
-        prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "select")
-        values = [dictionary_input[column.name] for column in partition_and_clustering]
-        return self._execute_query(prepared_statement, values).result()
+        try:
+            filtered_columns = self._filter_columns(dictionary_input, table_name, "select")
+            partition_and_clustering = [column for column in sorted(filtered_columns.values(), key=lambda x: x.name) if
+                                        column.kind == "partition_key" or column.kind == "clustering"]
+            prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "select")
+            values = [dictionary_input[column.name] for column in partition_and_clustering]
+            return self._execute_query(prepared_statement, values)
+        except Exception as e:
+            self.log.error(f"Failed to select data: {e}, in table {table_name}")
+            raise ScyllaException(e)
 
     def insert(self, dictionary_input: Dict[str, Any], table_name: str) -> None:
-        filtered_columns = self._filter_columns(dictionary_input, table_name, "insert")
-        prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "insert")
-        self._bind_delete_or_insert(filtered_columns, prepared_statement)
+        try:
+            filtered_columns = self._filter_columns(dictionary_input, table_name, "insert")
+            prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "insert")
+            self._bind_delete_or_insert(filtered_columns, prepared_statement)
+        except Exception as e:
+            self.log.error(f"Failed to insert data: {e}, in table {table_name}")
+            raise ScyllaException(e)
 
     def delete(self, dictionary_input: Dict[str, Any], table_name: str) -> None:
-        filtered_columns = self._filter_columns(dictionary_input, table_name, "delete")
-        prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "delete")
-        self._bind_delete_or_insert(filtered_columns, prepared_statement)
+        try:
+            filtered_columns = self._filter_columns(dictionary_input, table_name, "delete")
+            prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "delete")
+            self._bind_delete_or_insert(filtered_columns, prepared_statement)
+        except Exception as e:
+            self.log.error(f"Failed to delete data: {e}, in table {table_name}")
+            raise ScyllaException(e)
 
     def _bind_delete_or_insert(self, filtered_columns: Dict[str, Column],
                                prepared_statement: PreparedStatement) -> None:
@@ -247,14 +259,15 @@ class ScyllaService(IDatabaseService):
                   sorted(filtered_columns.values(), key=lambda x: x.name)]
         self._execute_query(prepared_statement, values)
 
-    def _execute_query(self, statement: PreparedStatement, values: List[Any]) -> ResponseFuture:
+    def _execute_query(self, statement: PreparedStatement, values: List[Any]) -> ResultSet:
+        self.log.info(f"Executing query: {statement.query_string} with values: {values}")
         self._semaphore.acquire()
         try:
-            return self.session.execute_async(statement.bind(values))
+            return self.session.execute_async(statement.bind(values)).result()
         except (NoHostAvailable, ConnectionException) as e:
             self.log.error(f"Connection error: {e}")
             self.reconnect()
-            return self.session.execute_async(statement.bind(values))
+            return self.session.execute_async(statement.bind(values)).result()
         finally:
             self._semaphore.release()
 
@@ -285,7 +298,6 @@ class ScyllaService(IDatabaseService):
 
     def _prepare_insert(self, hashed_name: str, columns: List[Column], keyspace: str, table_name: str,
                         dict_columns: Optional[Dict[str, Column]] = None) -> None:
-        self._check_clustering_columns(dict_columns, table_name)
         hashed_statement = {}
         keys = [column.name for column in columns]
         for column in columns:
@@ -298,7 +310,6 @@ class ScyllaService(IDatabaseService):
 
     def _prepare_delete(self, hashed_name: str, columns: List[Column], keyspace: str, table_name: str,
                         dict_columns: Optional[Dict[str, Column]] = None) -> None:
-        self._check_clustering_columns(dict_columns, table_name)
         values = _generate_pre_statement_labels(columns)
         statement = f"delete from {keyspace}.{table_name} where {' and '.join(values.values())}"
         self._prepared_statements[hashed_name] = self.session.prepare(statement)
