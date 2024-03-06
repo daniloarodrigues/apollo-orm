@@ -3,7 +3,7 @@ import os
 
 from apollo_orm.domains.models.entities.connection_config.entity import ConnectionConfig
 from apollo_orm.domains.models.entities.credentials.entity import Credentials
-from apollo_orm.orm.scylla import ORMInstance
+from apollo_orm.orm.core import ORMInstance
 
 
 def test_work_flow():
@@ -14,7 +14,7 @@ def test_work_flow():
     connection_config = ConnectionConfig(credentials, tables)
     connection = ORMInstance(connection_config)
     connection.insert(json_data, tables[0])
-    # connection.close()
+    connection.close()
     select_table = connection.select(json_data, tables[0])
     connection.delete(json_data, tables[0])
     select_deleted_table = connection.select(json_data, tables[0])

@@ -22,8 +22,8 @@ from apollo_orm.orm.abstracts.idatabase import IDatabaseService, DatabaseExcepti
 from apollo_orm.utils.logger.logger import Logger
 
 
-class ScyllaException(DatabaseException):
-    logger = Logger("ScyllaException")
+class ApolloORMException(DatabaseException):
+    logger = Logger("ApolloORMException")
 
     def __init__(self, message, *args, **kwargs):
         super().__init__(message, log="error", *args, **kwargs)
@@ -63,7 +63,7 @@ def _parse_to_cassandra_type(value: Any, cassandra_type: str) -> Any:
     elif cassandra_type in ["float", "double"]:
         return float(value)
     else:
-        raise ScyllaException(f"Type {cassandra_type} not supported")
+        raise ApolloORMException(f"Type {cassandra_type} not supported")
 
 
 def _timestamp_validate(value: Any) -> datetime:
@@ -105,7 +105,7 @@ def _filter_kind(columns: List[Column], kind: str) -> list[Column]:
 
 
 class ORMInstance(IDatabaseService):
-    log = Logger("ScyllaService")
+    log = Logger("ORMInstance")
 
     def __init__(self,
                  connection_config: ConnectionConfig,
@@ -127,7 +127,7 @@ class ORMInstance(IDatabaseService):
                 protocol_version: int = 4,
                 parallel_execution=5) -> None:
         if self._connection_config is None:
-            raise ScyllaException("Connection config is not set")
+            raise ApolloORMException("Connection config is not set")
         error_message = ""
         for _ in range(self._attempts):
             try:
@@ -151,7 +151,7 @@ class ORMInstance(IDatabaseService):
                 return
             except ConnectionException as e:
                 error_message = str(e) if str(e) else "Unknown error"
-        raise ScyllaException(f"Failed to connect after {self._attempts} attempts - {error_message}")
+        raise ApolloORMException(f"Failed to connect after {self._attempts} attempts - {error_message}")
 
     def close(self):
         if self.session is not None:
@@ -206,7 +206,7 @@ class ORMInstance(IDatabaseService):
         pendent_columns = [column.__str__() for column in filtered if
                            column.hash_id not in columns and column.kind == "partition_key"]
         if pendent_columns:
-            raise ScyllaException(
+            raise ApolloORMException(
                 f"""Column {pendent_columns} is not in the filtered columns.
                 All partition keys columns must be passed as parameter""")
 
@@ -216,7 +216,7 @@ class ORMInstance(IDatabaseService):
         pendent_columns = [column.__str__() for column in filtered if
                            column.hash_id not in columns and column.kind == "clustering"]
         if pendent_columns:
-            raise ScyllaException(
+            raise ApolloORMException(
                 f"""Column {pendent_columns} is not in the filtered columns.
                 All clustering columns must be passed as parameter""")
 
@@ -233,7 +233,7 @@ class ORMInstance(IDatabaseService):
             return self._execute_query(prepared_statement, values)
         except Exception as e:
             self.log.error(f"Failed to select data: {e}, in table {table_name}")
-            raise ScyllaException(e)
+            raise ApolloORMException(e)
 
     def insert(self, dictionary_input: Dict[str, Any], table_name: str) -> None:
         try:
@@ -242,7 +242,7 @@ class ORMInstance(IDatabaseService):
             self._bind_delete_or_insert(filtered_columns, prepared_statement)
         except Exception as e:
             self.log.error(f"Failed to insert data: {e}, in table {table_name}")
-            raise ScyllaException(e)
+            raise ApolloORMException(e)
 
     def delete(self, dictionary_input: Dict[str, Any], table_name: str) -> None:
         try:
@@ -251,7 +251,7 @@ class ORMInstance(IDatabaseService):
             self._bind_delete_or_insert(filtered_columns, prepared_statement)
         except Exception as e:
             self.log.error(f"Failed to delete data: {e}, in table {table_name}")
-            raise ScyllaException(e)
+            raise ApolloORMException(e)
 
     def _bind_delete_or_insert(self, filtered_columns: Dict[str, Column],
                                prepared_statement: PreparedStatement) -> None:
