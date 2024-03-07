@@ -267,7 +267,6 @@ class ORMInstance(IDatabaseService):
     def _prepare_dynamic_statement(self, columns: Dict[str, Column], table_name: str,
                                    query_type: str) -> PreparedStatement:
         keyspace = self._connection_config.credential.keyspace_name
-
         ordered_columns = sorted(columns.values(), key=lambda x: x.name)
         hashed_name = _text_to_hash(f"{query_type}".join([column.name for column in ordered_columns]))
         if hashed_name not in self._prepared_statements:
