@@ -1,16 +1,13 @@
 import hashlib
 import json
-import logging
 import re
-import time
 import uuid
-import threading
 from datetime import datetime, date
 
 from typing import Dict, Optional, List, Any
 
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster, Session, HostDistance, ResultSet, NoHostAvailable
+from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfile, ResultSet
 from cassandra.connection import ConnectionException
 from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy
 from cassandra.query import PreparedStatement
@@ -109,18 +106,20 @@ class ORMInstance(IDatabaseService):
 
     def __init__(self,
                  connection_config: ConnectionConfig,
-                 attempts: int = 5
+                 attempts: int = 5,
+                 client_timeout: int = 20
                  ):
         self._policy = DCAwareRoundRobinPolicy(
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
         self._load_balancing_policy = TokenAwarePolicy(self._policy)
+        self._execution_profile: ExecutionProfile = ExecutionProfile(load_balancing_policy=self._load_balancing_policy,
+                                                                     request_timeout=client_timeout)
         self._connection_config = connection_config
         self._attempts = attempts
         self._table_config: Optional[List[TableConfig]] = None
         self._prepared_statements: Dict[str, PreparedStatement] = {}
         self.cluster: Optional[Cluster] = None
         self.session: Optional[Session] = None
-        self._semaphore = None
         self.connect()
 
     def connect(self,
@@ -131,8 +130,6 @@ class ORMInstance(IDatabaseService):
         error_message = ""
         for _ in range(self._attempts):
             try:
-                if self._connection_config.credential.datacenter:
-                    logging.info(f"Datacenter detected: {self._connection_config.credential.datacenter}")
                 auth_provider = PlainTextAuthProvider(
                     username=self._connection_config.credential.user,
                     password=self._connection_config.credential.password
@@ -142,12 +139,11 @@ class ORMInstance(IDatabaseService):
                     port=self._connection_config.credential.port,
                     auth_provider=auth_provider,
                     protocol_version=protocol_version,
-                    load_balancing_policy=self._load_balancing_policy,
+                    execution_profiles={'EXECUTION_PROFILE': self._execution_profile}
                 )
                 self.session = self.cluster.connect()
                 self._scan_tables()
-                limit = self._get_number_of_requests()
-                self._semaphore = threading.Semaphore(limit)
+                self.log.info(f"Connected to {self._connection_config.credential.hosts}")
                 return
             except ConnectionException as e:
                 error_message = str(e) if str(e) else "Unknown error"
@@ -261,15 +257,12 @@ class ORMInstance(IDatabaseService):
 
     def _execute_query(self, statement: PreparedStatement, values: List[Any]) -> ResultSet:
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
-        self._semaphore.acquire()
         try:
-            return self.session.execute_async(statement.bind(values)).result()
+            return self.session.execute(statement.bind(values))
         except (NoHostAvailable, ConnectionException) as e:
             self.log.error(f"Connection error: {e}")
             self.reconnect()
-            return self.session.execute_async(statement.bind(values)).result()
-        finally:
-            self._semaphore.release()
+            return self.session.execute(statement.bind(values))
 
     def _prepare_dynamic_statement(self, columns: Dict[str, Column], table_name: str,
                                    query_type: str) -> PreparedStatement:
@@ -313,12 +306,3 @@ class ORMInstance(IDatabaseService):
         values = _generate_pre_statement_labels(columns)
         statement = f"delete from {keyspace}.{table_name} where {' and '.join(values.values())}"
         self._prepared_statements[hashed_name] = self.session.prepare(statement)
-
-    def _get_number_of_requests(self) -> int:
-        request_per_connection = self.cluster.get_max_requests_per_connection(host_distance=HostDistance.LOCAL)
-        max_connections = self.cluster.get_core_connections_per_host(host_distance=HostDistance.LOCAL)
-        return request_per_connection * max_connections * 0.95
-
-    def wait_for_finish(self):
-        while self._semaphore._value != self._get_number_of_requests():
-            time.sleep(200)

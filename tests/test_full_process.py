@@ -14,7 +14,6 @@ def test_work_flow():
     connection_config = ConnectionConfig(credentials, tables)
     connection = ORMInstance(connection_config)
     connection.insert(json_data, tables[0])
-    connection.close()
     select_table = connection.select(json_data, tables[0])
     connection.delete(json_data, tables[0])
     select_deleted_table = connection.select(json_data, tables[0])

@@ -40,6 +40,9 @@ class Logger:
     def info(self, message: str) -> None:
         self.__log(log_type="INFO", log_func=self.log.info, message=message)
 
+    def warn(self, message: str) -> None:
+        self.__log(log_type="WARN", log_func=self.log.warning, message=message)
+
     def step(self, begin=None, end=None) -> Callable:
 
         def log_info(func) -> Callable:
@@ -59,6 +62,3 @@ class Logger:
             return wrapper
 
         return log_info
-
-    def warn(self, message: str) -> None:
-        self.__log(log_type="WARN", log_func=self.log.warn, message=message)
