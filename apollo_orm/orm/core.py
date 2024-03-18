@@ -238,7 +238,7 @@ class ORMInstance(IDatabaseService):
             self._bind_delete_or_insert(filtered_columns, prepared_statement)
         except Exception as e:
             self.log.error(f"Failed to insert data: {e}, in table {table_name}")
-            raise ApolloORMException(e)
+            raise e
 
     def delete(self, dictionary_input: Dict[str, Any], table_name: str) -> None:
         try:
@@ -247,7 +247,7 @@ class ORMInstance(IDatabaseService):
             self._bind_delete_or_insert(filtered_columns, prepared_statement)
         except Exception as e:
             self.log.error(f"Failed to delete data: {e}, in table {table_name}")
-            raise ApolloORMException(e)
+            raise e
 
     def _bind_delete_or_insert(self, filtered_columns: Dict[str, Column],
                                prepared_statement: PreparedStatement) -> None:
