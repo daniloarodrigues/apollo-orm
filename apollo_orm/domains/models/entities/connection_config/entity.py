@@ -11,6 +11,7 @@ class ConnectionConfig:
         self.tables: List[str] = tables
 
     def __eq__(self, other):
-        if isinstance(other, ConnectionConfig):
-            return self.credential == other.credential and self.tables == other.tables
-        return False
+        return isinstance(other, ConnectionConfig) and all(
+            getattr(self, attr) == getattr(other, attr)
+            for attr in ['credential', 'tables']
+        )

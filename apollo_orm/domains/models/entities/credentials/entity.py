@@ -12,6 +12,7 @@ class Credentials:
         self.datacenter: str = datacenter
 
     def __eq__(self, other):
-        if isinstance(other, Credentials):
-            return self.hosts == other.hosts and self.port == other.port and self.user == other.user and self.password == other.password and self.keyspace_name == other.keyspace_name and self.datacenter == other.datacenter
-        return False
+        return isinstance(other, Credentials) and all(
+            getattr(self, attr) == getattr(other, attr)
+            for attr in ['hosts', 'port', 'user', 'password', 'keyspace_name', 'datacenter']
+        )
