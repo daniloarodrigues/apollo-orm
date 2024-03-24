@@ -1,7 +1,9 @@
 import hashlib
 import json
 import re
+import threading
 import uuid
+from asyncio import Semaphore
 from datetime import datetime, date
 
 from typing import Dict, Optional, List, Any
@@ -10,7 +12,7 @@ from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfile, ResultSet, ResponseFuture
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.connection import ConnectionException
-from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy
+from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, HostDistance
 from cassandra.query import PreparedStatement
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
@@ -110,8 +112,12 @@ class ORMInstance(IDatabaseService):
     def __init__(self,
                  connection_config: ConnectionConfig,
                  attempts: int = 5,
-                 client_timeout: int = 20
+                 client_timeout: int = 20,
+                 limit_execution_async: int = None
                  ):
+
+        self._limit_execution_async = limit_execution_async or self._get_number_of_requests()
+        self._semaphore: Optional[Semaphore] = None
         self._policy = DCAwareRoundRobinPolicy(
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
         self._load_balancing_policy = TokenAwarePolicy(self._policy)
@@ -144,6 +150,7 @@ class ORMInstance(IDatabaseService):
                     protocol_version=protocol_version,
                     execution_profiles={'EXECUTION_PROFILE': self._execution_profile}
                 )
+                self._semaphore = threading.Semaphore(self._limit_execution_async)
                 self.session = self.cluster.connect()
                 self._scan_tables()
                 self.log.info(f"Connected to {self._connection_config.credential.hosts}")
@@ -234,20 +241,20 @@ class ORMInstance(IDatabaseService):
             self.log.error(f"Failed to select data: {e}, in table {table_name}")
             raise ApolloORMException(e)
 
-    def insert(self, dictionary_input: Dict[str, Any], table_name: str, exec_async: bool = False) -> Optional[
-        ResponseFuture]:
+    def insert(self, dictionary_input: Dict[str, Any], table_name: str, exec_async: bool = False) \
+            -> Optional[ResponseFuture]:
         try:
             filtered_columns = self._filter_columns(dictionary_input, table_name, "insert")
             prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "insert")
             if exec_async:
                 return self._bind_delete_or_insert(filtered_columns, prepared_statement, exec_async)
-            self._bind_delete_or_insert(filtered_columns, prepared_statement, exec_async)
+            self._bind_delete_or_insert(filtered_columns, prepared_statement)
         except Exception as e:
             self.log.error(f"Failed to insert data: {e}, in table {table_name}")
             raise e
 
-    def delete(self, dictionary_input: Dict[str, Any], table_name: str, exec_async: bool = False) -> Optional[
-        ResponseFuture]:
+    def delete(self, dictionary_input: Dict[str, Any], table_name: str, exec_async: bool = False) \
+            -> Optional[ResponseFuture]:
         try:
             filtered_columns = self._filter_columns(dictionary_input, table_name, "delete")
             prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "delete")
@@ -300,15 +307,19 @@ class ORMInstance(IDatabaseService):
         return ResultList(successful, errors)
 
     def _bind_delete_or_insert(self, filtered_columns: Dict[str, Column],
-                               prepared_statement: PreparedStatement, exec_async: bool = False) -> Optional[
-        ResponseFuture]:
+                               prepared_statement: PreparedStatement, exec_async: bool = False) \
+            -> Optional[ResponseFuture]:
         values = [filtered_columns[column.hash_id].value for column in
                   sorted(filtered_columns.values(), key=lambda x: x.name)]
         if exec_async:
             return self._execute_async_query(prepared_statement, values)
         self._execute_query(prepared_statement, values)
 
+    def release_semaphore(self):
+        self._semaphore.release()
+
     def _execute_async_query(self, statement: PreparedStatement, values: List[Any]) -> ResponseFuture:
+        self._semaphore.acquire()
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
         try:
             return self.session.execute_async(statement.bind(values))
@@ -367,3 +378,8 @@ class ORMInstance(IDatabaseService):
         values = _generate_pre_statement_labels(columns)
         statement = f"delete from {keyspace}.{table_name} where {' and '.join(values.values())}"
         self._prepared_statements[hashed_name] = self.session.prepare(statement)
+
+    def _get_number_of_requests(self) -> int:
+        request_per_connection = self.session.cluster.get_max_requests_per_connection(host_distance=HostDistance.LOCAL)
+        max_connections = self.session.cluster.get_core_connections_per_host(host_distance=HostDistance.LOCAL)
+        return request_per_connection * max_connections * 0.95
