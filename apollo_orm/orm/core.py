@@ -115,8 +115,7 @@ class ORMInstance(IDatabaseService):
                  client_timeout: int = 20,
                  limit_execution_async: int = None
                  ):
-
-        self._limit_execution_async = limit_execution_async or self._get_number_of_requests()
+        self._limit = limit_execution_async
         self._semaphore: Optional[Semaphore] = None
         self._policy = DCAwareRoundRobinPolicy(
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
@@ -150,7 +149,9 @@ class ORMInstance(IDatabaseService):
                     protocol_version=protocol_version,
                     execution_profiles={'EXECUTION_PROFILE': self._execution_profile}
                 )
-                self._semaphore = threading.Semaphore(self._limit_execution_async)
+                self.log.info(
+                    f"Limit execution async: {self._limit} - Recommender: {self._get_number_of_requests()}")
+                self._semaphore = threading.Semaphore(self._limit or self._get_number_of_requests())
                 self.session = self.cluster.connect()
                 self._scan_tables()
                 self.log.info(f"Connected to {self._connection_config.credential.hosts}")
