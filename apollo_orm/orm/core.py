@@ -8,11 +8,15 @@ from typing import Dict, Optional, List, Any
 
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfile, ResultSet
+from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.connection import ConnectionException
 from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy
 from cassandra.query import PreparedStatement
 
 from apollo_orm.domains.models.entities.column.entity import Column
+from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
+from apollo_orm.domains.models.entities.concurrent.result_list.entity import ResultList
+from apollo_orm.domains.models.entities.concurrent.result_process.entity import ResultProcess
 from apollo_orm.domains.models.entities.connection_config.entity import ConnectionConfig
 from apollo_orm.domains.models.entities.table_config.entity import TableConfig
 from apollo_orm.orm.abstracts.idatabase import IDatabaseService, DatabaseException
@@ -248,6 +252,43 @@ class ORMInstance(IDatabaseService):
         except Exception as e:
             self.log.error(f"Failed to delete data: {e}, in table {table_name}")
             raise e
+
+    def pre_process_insert(self, list_of_dict: List[Dict[str, Any]], table_name: str) -> PreProcessedInsertData:
+        statements_and_params = {}
+        errors: Optional[List[ResultProcess]] = []
+        for dictionary_input in list_of_dict:
+            try:
+                filtered_columns = self._filter_columns(dictionary_input, table_name, "insert")
+                prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "insert")
+                if prepared_statement not in statements_and_params:
+                    statements_and_params[prepared_statement] = []
+                values = [filtered_columns[column.hash_id].value for column in
+                          sorted(filtered_columns.values(), key=lambda x: x.name)]
+                statements_and_params[prepared_statement].append(tuple(values))
+            except Exception as e:
+                errors.append(ResultProcess(str(e), None, dictionary_input))
+                self.log.error(f"Failed to pre process data: {e}, in table {table_name}")
+        return PreProcessedInsertData(statements_and_params, errors)
+
+    def insert_concurrent(self, pre_processed_insert: PreProcessedInsertData, workers: int = 10) -> ResultList:
+        errors: List[ResultProcess] = []
+        successful: List[ResultProcess] = []
+        if pre_processed_insert.errors:
+            errors.extend(pre_processed_insert.errors)
+        for statement, values in pre_processed_insert.statements_and_params.items():
+            try:
+                result = execute_concurrent_with_args(self.session, statement, values, concurrency=workers)
+                for success, failed in result:
+                    if failed:
+                        errors.append(ResultProcess(str(failed), statement.query_string, values))
+                    else:
+                        successful.append(
+                            ResultProcess("Data inserted successfully", statement.query_string, values)
+                        )
+            except Exception as e:
+                errors.append(ResultProcess(str(e), statement.query_string, values))
+                self.log.error(f"Failed to insert concurrent data: {e}")
+        return ResultList(successful, errors)
 
     def _bind_delete_or_insert(self, filtered_columns: Dict[str, Column],
                                prepared_statement: PreparedStatement) -> None:
