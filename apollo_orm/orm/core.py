@@ -149,10 +149,10 @@ class ORMInstance(IDatabaseService):
                     protocol_version=protocol_version,
                     execution_profiles={'EXECUTION_PROFILE': self._execution_profile}
                 )
+                self.session = self.cluster.connect()
                 self.log.info(
                     f"Limit execution async: {self._limit} - Recommender: {self._get_number_of_requests()}")
                 self._semaphore = threading.Semaphore(self._limit or self._get_number_of_requests())
-                self.session = self.cluster.connect()
                 self._scan_tables()
                 self.log.info(f"Connected to {self._connection_config.credential.hosts}")
                 return
