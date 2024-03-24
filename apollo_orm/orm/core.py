@@ -381,6 +381,6 @@ class ORMInstance(IDatabaseService):
         self._prepared_statements[hashed_name] = self.session.prepare(statement)
 
     def _get_number_of_requests(self) -> int:
-        request_per_connection = self.session.cluster.get_max_requests_per_connection(host_distance=HostDistance.LOCAL)
-        max_connections = self.session.cluster.get_core_connections_per_host(host_distance=HostDistance.LOCAL)
+        request_per_connection = self.cluster.get_max_requests_per_connection(host_distance=HostDistance.LOCAL)
+        max_connections = self.cluster.get_core_connections_per_host(host_distance=HostDistance.LOCAL)
         return request_per_connection * max_connections * 0.95
