@@ -7,12 +7,11 @@ from datetime import datetime, date
 from typing import Dict, Optional, List, Any
 
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfile, ResultSet
+from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfile, ResultSet, ResponseFuture
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.connection import ConnectionException
 from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy
 from cassandra.query import PreparedStatement
-
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
 from apollo_orm.domains.models.entities.concurrent.result_list.entity import ResultList
@@ -235,19 +234,25 @@ class ORMInstance(IDatabaseService):
             self.log.error(f"Failed to select data: {e}, in table {table_name}")
             raise ApolloORMException(e)
 
-    def insert(self, dictionary_input: Dict[str, Any], table_name: str) -> None:
+    def insert(self, dictionary_input: Dict[str, Any], table_name: str, exec_async: bool = False) -> Optional[
+        ResponseFuture]:
         try:
             filtered_columns = self._filter_columns(dictionary_input, table_name, "insert")
             prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "insert")
-            self._bind_delete_or_insert(filtered_columns, prepared_statement)
+            if exec_async:
+                return self._bind_delete_or_insert(filtered_columns, prepared_statement, exec_async)
+            self._bind_delete_or_insert(filtered_columns, prepared_statement, exec_async)
         except Exception as e:
             self.log.error(f"Failed to insert data: {e}, in table {table_name}")
             raise e
 
-    def delete(self, dictionary_input: Dict[str, Any], table_name: str) -> None:
+    def delete(self, dictionary_input: Dict[str, Any], table_name: str, exec_async: bool = False) -> Optional[
+        ResponseFuture]:
         try:
             filtered_columns = self._filter_columns(dictionary_input, table_name, "delete")
             prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "delete")
+            if exec_async:
+                return self._bind_delete_or_insert(filtered_columns, prepared_statement, exec_async)
             self._bind_delete_or_insert(filtered_columns, prepared_statement)
         except Exception as e:
             self.log.error(f"Failed to delete data: {e}, in table {table_name}")
@@ -270,7 +275,8 @@ class ORMInstance(IDatabaseService):
                 self.log.error(f"Failed to pre process data: {e}, in table {table_name}")
         return PreProcessedInsertData(statements_and_params, errors)
 
-    def insert_concurrent(self, pre_processed_insert: PreProcessedInsertData, workers: int = 10) -> ResultList:
+    def insert_concurrent(self, pre_processed_insert: PreProcessedInsertData, workers: int = 10,
+                          retry: int = 3) -> ResultList:
         errors: List[ResultProcess] = []
         successful: List[ResultProcess] = []
         if pre_processed_insert.errors:
@@ -281,20 +287,35 @@ class ORMInstance(IDatabaseService):
                 for success, failed in result:
                     if failed:
                         errors.append(ResultProcess(str(failed), statement.query_string, values))
+                        self.log.error(f"Failed to insert concurrent data: {failed}")
                     else:
                         successful.append(
-                            ResultProcess("Data inserted successfully", statement.query_string, values)
-                        )
-            except Exception as e:
-                errors.append(ResultProcess(str(e), statement.query_string, values))
-                self.log.error(f"Failed to insert concurrent data: {e}")
+                            ResultProcess("Data inserted successfully", statement.query_string, values))
+            except (NoHostAvailable, ConnectionException) as e:
+                self.log.error("Connection error: {e}")
+                if retry == 0:
+                    raise ApolloORMException(f"Failed to insert data: {statement} - {values} - Error Message: {e}")
+                self.reconnect()
+                self.insert_concurrent(pre_processed_insert, workers, retry - 1)
         return ResultList(successful, errors)
 
     def _bind_delete_or_insert(self, filtered_columns: Dict[str, Column],
-                               prepared_statement: PreparedStatement) -> None:
+                               prepared_statement: PreparedStatement, exec_async: bool = False) -> Optional[
+        ResponseFuture]:
         values = [filtered_columns[column.hash_id].value for column in
                   sorted(filtered_columns.values(), key=lambda x: x.name)]
+        if exec_async:
+            return self._execute_async_query(prepared_statement, values)
         self._execute_query(prepared_statement, values)
+
+    def _execute_async_query(self, statement: PreparedStatement, values: List[Any]) -> ResponseFuture:
+        self.log.info(f"Executing query: {statement.query_string} with values: {values}")
+        try:
+            return self.session.execute_async(statement.bind(values))
+        except (NoHostAvailable, ConnectionException) as e:
+            self.log.error(f"Connection error: {e}")
+            self.reconnect()
+            return self.session.execute_async(statement.bind(values))
 
     def _execute_query(self, statement: PreparedStatement, values: List[Any]) -> ResultSet:
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
@@ -336,9 +357,9 @@ class ORMInstance(IDatabaseService):
         for column in columns:
             hashed_statement[column.hash_id] = "?"
         statement = f"""insert into
-        {keyspace}.{table_name}
-        ({', '.join(keys)})
-        values ({', '.join(hashed_statement.values())})"""
+            {keyspace}.{table_name}
+            ({', '.join(keys)})
+            values ({', '.join(hashed_statement.values())})"""
         self._prepared_statements[hashed_name] = self.session.prepare(statement)
 
     def _prepare_delete(self, hashed_name: str, columns: List[Column], keyspace: str, table_name: str,
