@@ -12,7 +12,7 @@ from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfile, ResultSet, ResponseFuture
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.connection import ConnectionException
-from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, HostDistance
+from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy
 from cassandra.query import PreparedStatement
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
@@ -113,9 +113,10 @@ class ORMInstance(IDatabaseService):
                  connection_config: ConnectionConfig,
                  attempts: int = 5,
                  client_timeout: int = 20,
-                 limit_execution_async: int = None
+                 async_concurrent: int = 32000
                  ):
-        self._limit = limit_execution_async
+        self._in_process = []
+        self._async_concurrent = async_concurrent
         self._semaphore: Optional[Semaphore] = None
         self._policy = DCAwareRoundRobinPolicy(
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
@@ -150,9 +151,7 @@ class ORMInstance(IDatabaseService):
                     execution_profiles={'EXECUTION_PROFILE': self._execution_profile}
                 )
                 self.session = self.cluster.connect()
-                self.log.info(
-                    f"Limit execution async: {self._limit} - Recommender: {self._get_number_of_requests()}")
-                self._semaphore = threading.Semaphore(self._limit or self._get_number_of_requests())
+                self._semaphore = threading.Semaphore(self._async_concurrent)
                 self._scan_tables()
                 self.log.info(f"Connected to {self._connection_config.credential.hosts}")
                 return
@@ -215,7 +214,7 @@ class ORMInstance(IDatabaseService):
         if pendent_columns:
             raise ApolloORMException(
                 f"""Column {pendent_columns} is not in the filtered columns.
-                All partition keys columns must be passed as parameter""")
+                All partition keys columns must be passed as parameter""".strip())
 
     def _check_clustering_columns(self, columns: Dict[str, Column], table_name: str) -> None:
         non_regular_columns = self._table_config[self._connection_config.tables.index(table_name)].columns
@@ -225,7 +224,7 @@ class ORMInstance(IDatabaseService):
         if pendent_columns:
             raise ApolloORMException(
                 f"""Column {pendent_columns} is not in the filtered columns.
-                All clustering columns must be passed as parameter""")
+                All clustering columns must be passed as parameter""".strip())
 
     def select_from_json(self, json_input: str, table_name: str) -> ResultSet:
         return self.select(json.loads(json_input), table_name)
@@ -319,15 +318,17 @@ class ORMInstance(IDatabaseService):
     def release_semaphore(self):
         self._semaphore.release()
 
-    def _execute_async_query(self, statement: PreparedStatement, values: List[Any]) -> ResponseFuture:
+    def _execute_async_query(self, statement: PreparedStatement, values: List[Any], retry: int = 5) -> ResponseFuture:
         self._semaphore.acquire()
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
         try:
-            return self.session.execute_async(statement.bind(values))
+            self.session.execute_async(statement.bind(values))
         except (NoHostAvailable, ConnectionException) as e:
-            self.log.error(f"Connection error: {e}")
+            if retry == 0:
+                raise ApolloORMException(f"Failed to execute async query: {statement} - {values} - Error Message: {e}")
+            self.log.error(f"Connection error: {e}. Retrying {retry} more times.")
             self.reconnect()
-            return self.session.execute_async(statement.bind(values))
+            return self._execute_async_query(statement, values, retry - 1)
 
     def _execute_query(self, statement: PreparedStatement, values: List[Any]) -> ResultSet:
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
@@ -379,8 +380,3 @@ class ORMInstance(IDatabaseService):
         values = _generate_pre_statement_labels(columns)
         statement = f"delete from {keyspace}.{table_name} where {' and '.join(values.values())}"
         self._prepared_statements[hashed_name] = self.session.prepare(statement)
-
-    def _get_number_of_requests(self) -> int:
-        request_per_connection = self.cluster.get_max_requests_per_connection(host_distance=HostDistance.LOCAL)
-        max_connections = self.cluster.get_core_connections_per_host(host_distance=HostDistance.LOCAL)
-        return request_per_connection * max_connections * 0.95
