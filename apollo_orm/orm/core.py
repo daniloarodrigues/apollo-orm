@@ -318,17 +318,15 @@ class ORMInstance(IDatabaseService):
     def release_semaphore(self):
         self._semaphore.release()
 
-    def _execute_async_query(self, statement: PreparedStatement, values: List[Any], retry: int = 5) -> ResponseFuture:
+    def _execute_async_query(self, statement: PreparedStatement, values: List[Any]) -> ResponseFuture:
         self._semaphore.acquire()
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
         try:
-            self.session.execute_async(statement.bind(values))
+            return self.session.execute_async(statement.bind(values))
         except (NoHostAvailable, ConnectionException) as e:
-            if retry == 0:
-                raise ApolloORMException(f"Failed to execute async query: {statement} - {values} - Error Message: {e}")
-            self.log.error(f"Connection error: {e}. Retrying {retry} more times.")
+            self.log.error(f"Connection error: {e}. Reconnecting...")
             self.reconnect()
-            return self._execute_async_query(statement, values, retry - 1)
+            return self.session.execute_async(statement.bind(values))
 
     def _execute_query(self, statement: PreparedStatement, values: List[Any]) -> ResultSet:
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
