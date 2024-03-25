@@ -12,7 +12,7 @@ from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfile, ResultSet, ResponseFuture
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.connection import ConnectionException
-from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy
+from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, HostDistance
 from cassandra.query import PreparedStatement
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
@@ -112,11 +112,9 @@ class ORMInstance(IDatabaseService):
     def __init__(self,
                  connection_config: ConnectionConfig,
                  attempts: int = 5,
-                 client_timeout: int = 20,
-                 async_concurrent: int = 32000
+                 client_timeout: int = 20
                  ):
         self._in_process = []
-        self._async_concurrent = async_concurrent
         self._semaphore: Optional[Semaphore] = None
         self._policy = DCAwareRoundRobinPolicy(
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
@@ -132,8 +130,7 @@ class ORMInstance(IDatabaseService):
         self.connect()
 
     def connect(self,
-                protocol_version: int = 4,
-                parallel_execution=5) -> None:
+                protocol_version: int = 4) -> None:
         if self._connection_config is None:
             raise ApolloORMException("Connection config is not set")
         error_message = ""
@@ -151,7 +148,7 @@ class ORMInstance(IDatabaseService):
                     execution_profiles={'EXECUTION_PROFILE': self._execution_profile}
                 )
                 self.session = self.cluster.connect()
-                self._semaphore = threading.Semaphore(self._async_concurrent)
+                self._semaphore = threading.Semaphore(self._get_number_of_requests())
                 self._scan_tables()
                 self.log.info(f"Connected to {self._connection_config.credential.hosts}")
                 return
@@ -378,3 +375,8 @@ class ORMInstance(IDatabaseService):
         values = _generate_pre_statement_labels(columns)
         statement = f"delete from {keyspace}.{table_name} where {' and '.join(values.values())}"
         self._prepared_statements[hashed_name] = self.session.prepare(statement)
+
+    def _get_number_of_requests(self) -> int:
+        request_per_connection = self.cluster.get_max_requests_per_connection(host_distance=HostDistance.LOCAL)
+        max_connections = self.cluster.get_core_connections_per_host(host_distance=HostDistance.LOCAL)
+        return request_per_connection * max_connections * 0.95
