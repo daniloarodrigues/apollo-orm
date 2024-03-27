@@ -54,7 +54,7 @@ def _column_name_to_hash(parameters: Any) -> Dict[str, Any]:
 def _parse_to_cassandra_type(value: Any, cassandra_type: str) -> Any:
     if cassandra_type in ["uuid", "timeuuid"]:
         return uuid.UUID(value)
-    elif cassandra_type in ["boolean", "text", "int", "bigint"]:
+    elif cassandra_type in ["boolean", "text", "int", "bigint", "decimal"]:
         return value
     elif cassandra_type == "timestamp":
         return _timestamp_validate(value)
@@ -65,7 +65,7 @@ def _parse_to_cassandra_type(value: Any, cassandra_type: str) -> Any:
     elif cassandra_type in ["float", "double"]:
         return float(value)
     else:
-        raise ApolloORMException(f"Type {cassandra_type} not supported")
+        raise ApolloORMException(f"Type {cassandra_type} not supported. Value {value}")
 
 
 def _timestamp_validate(value: Any) -> datetime:
