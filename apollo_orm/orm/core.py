@@ -179,6 +179,9 @@ class ORMInstance(IDatabaseService):
         for table in self._connection_config.tables:
             values = [self._connection_config.credential.keyspace_name, table]
             config_rows = self.session.execute(statement.bind(values))
+            if not config_rows:
+                raise ApolloORMException(
+                    f"Not found keyspace {self._connection_config.credential.keyspace_name} or table {table}")
             columns_list = [
                 Column(_text_to_hash(config_row.column_name), config_row.column_name, config_row.kind, config_row.type)
                 for config_row in config_rows]
@@ -211,7 +214,7 @@ class ORMInstance(IDatabaseService):
         if pendent_columns:
             raise ApolloORMException(
                 f"""Column {pendent_columns} is not in the filtered columns.
-                All partition keys columns must be passed as parameter""".strip())
+                All partition keys columns must be passed as parameter""".rstrip())
 
     def _check_clustering_columns(self, columns: Dict[str, Column], table_name: str) -> None:
         non_regular_columns = self._table_config[self._connection_config.tables.index(table_name)].columns
@@ -221,7 +224,7 @@ class ORMInstance(IDatabaseService):
         if pendent_columns:
             raise ApolloORMException(
                 f"""Column {pendent_columns} is not in the filtered columns.
-                All clustering columns must be passed as parameter""".strip())
+                All clustering columns must be passed as parameter""".rstrip())
 
     def select_from_json(self, json_input: str, table_name: str) -> ResultSet:
         return self.select(json.loads(json_input), table_name)
