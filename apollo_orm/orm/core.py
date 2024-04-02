@@ -14,7 +14,7 @@ from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfil
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.connection import ConnectionException
 from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, HostDistance, RetryPolicy, \
-    ExponentialReconnectionPolicy, SpeculativeExecutionPolicy
+    ExponentialReconnectionPolicy, ConstantSpeculativeExecutionPolicy
 from cassandra.query import PreparedStatement
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
@@ -121,10 +121,11 @@ class ORMInstance(IDatabaseService):
         self._policy = DCAwareRoundRobinPolicy(
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
         self._load_balancing_policy = TokenAwarePolicy(self._policy)
-        self._execution_profile: ExecutionProfile = ExecutionProfile(load_balancing_policy=self._load_balancing_policy,
-                                                                     request_timeout=client_timeout,
-                                                                     retry_policy=RetryPolicy(),
-                                                                     speculative_execution_policy=SpeculativeExecutionPolicy())
+        self._execution_profile = ExecutionProfile(load_balancing_policy=self._load_balancing_policy,
+                                                   request_timeout=client_timeout,
+                                                   retry_policy=RetryPolicy(),
+                                                   speculative_execution_policy=ConstantSpeculativeExecutionPolicy(
+                                                       delay=0.1, max_attempts=attempts))
         self._connection_config = connection_config
         self._attempts = attempts
         self._table_config: Optional[List[TableConfig]] = None
@@ -256,7 +257,7 @@ class ORMInstance(IDatabaseService):
                 return self._bind_delete_or_insert(filtered_columns, prepared_statement, exec_async)
             self._bind_delete_or_insert(filtered_columns, prepared_statement)
         except Exception as e:
-            self.log.error(f"Failed to insert data: {e}, in table {table_name}")
+            self.log.error(f"Failed to insert data: {dictionary_input}, in table {table_name}")
             raise e
 
     def delete(self, dictionary_input: Dict[str, Any], table_name: str, exec_async: bool = False) \
@@ -329,11 +330,14 @@ class ORMInstance(IDatabaseService):
         statement.is_idempotent = True
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
         try:
-            return self.session.execute_async(statement.bind(values))
+            return self.session.execute_async(statement, values)
         except (NoHostAvailable, ConnectionException) as e:
             self.log.error(f"Connection error: {e}. Reconnecting...")
             self.reconnect()
-            return self.session.execute_async(statement.bind(values))
+            return self.session.execute_async(statement, values)
+        except Exception as e:
+            self.log.error(f"Failed to execute query: {statement.query_string, values}")
+            raise ApolloORMException(f"Failed to execute query: {statement.query_string, values} - {e}")
 
     def _execute_query(self, statement: PreparedStatement, values: List[Any]) -> ResultSet:
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
