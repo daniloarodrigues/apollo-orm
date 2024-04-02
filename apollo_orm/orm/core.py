@@ -12,7 +12,8 @@ from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfile, ResultSet, ResponseFuture
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.connection import ConnectionException
-from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, HostDistance
+from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, HostDistance, RetryPolicy, \
+    ExponentialReconnectionPolicy
 from cassandra.query import PreparedStatement
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
@@ -145,7 +146,10 @@ class ORMInstance(IDatabaseService):
                     port=self._connection_config.credential.port,
                     auth_provider=auth_provider,
                     protocol_version=protocol_version,
-                    execution_profiles={'EXECUTION_PROFILE': self._execution_profile}
+                    execution_profiles={'EXECUTION_PROFILE': self._execution_profile},
+                    default_retry_policy=RetryPolicy(),
+                    reconnection_policy=ExponentialReconnectionPolicy(base_delay=1.0, max_delay=60.0,
+                                                                      max_attempts=self._attempts)
                 )
                 self.session = self.cluster.connect()
                 self._semaphore = threading.Semaphore(self._get_number_of_requests())
