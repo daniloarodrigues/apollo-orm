@@ -9,11 +9,12 @@ from datetime import datetime, date
 from typing import Dict, Optional, List, Any
 
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfile, ResultSet, ResponseFuture
+from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfile, ResultSet, ResponseFuture, \
+    EXEC_PROFILE_DEFAULT
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.connection import ConnectionException
 from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, HostDistance, RetryPolicy, \
-    ExponentialReconnectionPolicy
+    ExponentialReconnectionPolicy, SpeculativeExecutionPolicy
 from cassandra.query import PreparedStatement
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
@@ -121,7 +122,9 @@ class ORMInstance(IDatabaseService):
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
         self._load_balancing_policy = TokenAwarePolicy(self._policy)
         self._execution_profile: ExecutionProfile = ExecutionProfile(load_balancing_policy=self._load_balancing_policy,
-                                                                     request_timeout=client_timeout)
+                                                                     request_timeout=client_timeout,
+                                                                     retry_policy=RetryPolicy(),
+                                                                     speculative_execution_policy=SpeculativeExecutionPolicy())
         self._connection_config = connection_config
         self._attempts = attempts
         self._table_config: Optional[List[TableConfig]] = None
@@ -146,8 +149,7 @@ class ORMInstance(IDatabaseService):
                     port=self._connection_config.credential.port,
                     auth_provider=auth_provider,
                     protocol_version=protocol_version,
-                    execution_profiles={'EXECUTION_PROFILE': self._execution_profile},
-                    default_retry_policy=RetryPolicy(),
+                    execution_profiles={EXEC_PROFILE_DEFAULT: self._execution_profile},
                     reconnection_policy=ExponentialReconnectionPolicy(base_delay=1.0, max_delay=60.0,
                                                                       max_attempts=self._attempts)
                 )
@@ -324,6 +326,7 @@ class ORMInstance(IDatabaseService):
 
     def _execute_async_query(self, statement: PreparedStatement, values: List[Any]) -> ResponseFuture:
         self._semaphore.acquire()
+        statement.is_idempotent = True
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
         try:
             return self.session.execute_async(statement.bind(values))
