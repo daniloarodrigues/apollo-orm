@@ -6,6 +6,7 @@ from datetime import datetime, date
 
 from typing import Dict, Optional, List, Any
 
+from cassandra import ConsistencyLevel
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfile, ResultSet, ResponseFuture, \
     EXEC_PROFILE_DEFAULT
@@ -133,29 +134,45 @@ class ORMRetryPolicy(RetryPolicy):
         return self.RETHROW
 
 
+def get_consistency_level(consistency: str) -> int:
+    ConsistencyLevel.name_to_value = {
+        'ANY': ConsistencyLevel.ANY,
+        'ONE': ConsistencyLevel.ONE,
+        'TWO': ConsistencyLevel.TWO,
+        'THREE': ConsistencyLevel.THREE,
+        'QUORUM': ConsistencyLevel.QUORUM,
+        'ALL': ConsistencyLevel.ALL,
+        'LOCAL_QUORUM': ConsistencyLevel.LOCAL_QUORUM,
+        'EACH_QUORUM': ConsistencyLevel.EACH_QUORUM,
+        'SERIAL': ConsistencyLevel.SERIAL,
+        'LOCAL_SERIAL': ConsistencyLevel.LOCAL_SERIAL,
+        'LOCAL_ONE': ConsistencyLevel.LOCAL_ONE
+    }
+    return ConsistencyLevel.name_to_value[consistency]
+
+
 class ORMInstance(IDatabaseService):
     log = Logger("ORMInstance")
 
     def __init__(self,
                  connection_config: ConnectionConfig,
                  attempts: int = 5,
-                 client_timeout: int = 20.0,
-                 consistency_level: Optional[str] = None
+                 consistency_level: str = "LOCAL_ONE",
+                 client_timeout: int = 20.0
                  ):
-        self._in_process = []
+        self._attempts = attempts
         self._speculative_execution_policy = ConstantSpeculativeExecutionPolicy(
-            delay=0.5, max_attempts=attempts)
+            delay=0.1, max_attempts=attempts)
         self._policy = DCAwareRoundRobinPolicy(
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
         self._load_balancing_policy = TokenAwarePolicy(self._policy)
         self._execution_profile = ExecutionProfile(load_balancing_policy=self._load_balancing_policy,
                                                    request_timeout=client_timeout,
+                                                   consistency_level=get_consistency_level(consistency_level),
                                                    retry_policy=ORMRetryPolicy(attempts),
-                                                   consistency_level=consistency_level,
                                                    speculative_execution_policy=self._speculative_execution_policy
                                                    )
         self._connection_config = connection_config
-        self._attempts = attempts
         self._table_config: Optional[List[TableConfig]] = None
         self._prepared_statements: Dict[str, PreparedStatement] = {}
         self.cluster: Optional[Cluster] = None
