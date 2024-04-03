@@ -14,7 +14,7 @@ from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfil
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.connection import ConnectionException
 from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, HostDistance, RetryPolicy, \
-    ExponentialReconnectionPolicy, ConstantSpeculativeExecutionPolicy
+    ExponentialReconnectionPolicy
 from cassandra.query import PreparedStatement
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
@@ -123,9 +123,7 @@ class ORMInstance(IDatabaseService):
         self._load_balancing_policy = TokenAwarePolicy(self._policy)
         self._execution_profile = ExecutionProfile(load_balancing_policy=self._load_balancing_policy,
                                                    request_timeout=client_timeout,
-                                                   retry_policy=RetryPolicy(),
-                                                   speculative_execution_policy=ConstantSpeculativeExecutionPolicy(
-                                                       delay=0.1, max_attempts=attempts))
+                                                   retry_policy=RetryPolicy())
         self._connection_config = connection_config
         self._attempts = attempts
         self._table_config: Optional[List[TableConfig]] = None
