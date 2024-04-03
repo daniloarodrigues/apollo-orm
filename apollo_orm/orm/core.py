@@ -114,7 +114,7 @@ class ORMInstance(IDatabaseService):
     def __init__(self,
                  connection_config: ConnectionConfig,
                  attempts: int = 5,
-                 client_timeout: int = 20
+                 client_timeout: int = 20.0
                  ):
         self._in_process = []
         self._semaphore: Optional[Semaphore] = None
@@ -183,7 +183,7 @@ class ORMInstance(IDatabaseService):
         statement = self.session.prepare(f"select {columns_statement} from {system_schema} where {where_statement}")
         for table in self._connection_config.tables:
             values = [self._connection_config.credential.keyspace_name, table]
-            config_rows = self.session.execute(statement.bind(values))
+            config_rows = self.session.execute(statement, values)
             if not config_rows:
                 raise ApolloORMException(
                     f"Not found keyspace {self._connection_config.credential.keyspace_name} or table {table}")
@@ -340,11 +340,11 @@ class ORMInstance(IDatabaseService):
     def _execute_query(self, statement: PreparedStatement, values: List[Any]) -> ResultSet:
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
         try:
-            return self.session.execute(statement.bind(values))
+            return self.session.execute(statement, values)
         except (NoHostAvailable, ConnectionException) as e:
             self.log.error(f"Connection error: {e}")
             self.reconnect()
-            return self.session.execute(statement.bind(values))
+            return self.session.execute(statement, values)
 
     def _prepare_dynamic_statement(self, columns: Dict[str, Column], table_name: str,
                                    query_type: str) -> PreparedStatement:
