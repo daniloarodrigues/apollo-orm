@@ -1,9 +1,7 @@
 import hashlib
 import json
 import re
-import threading
 import uuid
-from asyncio import Semaphore
 from datetime import datetime, date
 
 from typing import Dict, Optional, List, Any
@@ -13,8 +11,8 @@ from cassandra.cluster import Cluster, Session, NoHostAvailable, ExecutionProfil
     EXEC_PROFILE_DEFAULT
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.connection import ConnectionException
-from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, HostDistance, RetryPolicy, \
-    ExponentialReconnectionPolicy
+from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, RetryPolicy, \
+    ExponentialReconnectionPolicy, ConstantSpeculativeExecutionPolicy
 from cassandra.query import PreparedStatement
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
@@ -108,22 +106,54 @@ def _filter_kind(columns: List[Column], kind: str) -> list[Column]:
     return [column for column in columns if column.kind == kind]
 
 
+class ORMRetryPolicy(RetryPolicy):
+    def __init__(self, max_retry_attempts: int = 5):
+        self.MAX_RETRY_ATTEMPTS = max_retry_attempts
+
+    def on_read_timeout(self, query, consistency, required_responses, received_responses, data_retrieved, retry_num):
+        if retry_num < self.MAX_RETRY_ATTEMPTS and received_responses >= required_responses and not data_retrieved:
+            return self.RETRY, consistency
+        return self.RETHROW, None
+
+    def on_write_timeout(self, query, consistency, write_type, required_responses, received_responses, retry_num):
+        if retry_num < self.MAX_RETRY_ATTEMPTS and (
+                (write_type == "BATCH_LOG" and received_responses >= required_responses) or (
+                write_type != "BATCH_LOG" and received_responses > 0)):
+            return self.RETRY
+        return self.RETHROW
+
+    def on_unavailable(self, query, consistency, required_replicas, alive_replicas, retry_num):
+        if retry_num < self.MAX_RETRY_ATTEMPTS and alive_replicas < required_replicas:
+            return self.RETRY
+        return self.RETHROW
+
+    def on_request_error(self, query, consistency, error, retry_num):
+        if retry_num < self.MAX_RETRY_ATTEMPTS:
+            return self.RETRY
+        return self.RETHROW
+
+
 class ORMInstance(IDatabaseService):
     log = Logger("ORMInstance")
 
     def __init__(self,
                  connection_config: ConnectionConfig,
                  attempts: int = 5,
-                 client_timeout: int = 20.0
+                 client_timeout: int = 20.0,
+                 consistency_level: Optional[str] = None
                  ):
         self._in_process = []
-        self._semaphore: Optional[Semaphore] = None
+        self._speculative_execution_policy = ConstantSpeculativeExecutionPolicy(
+            delay=0.5, max_attempts=attempts)
         self._policy = DCAwareRoundRobinPolicy(
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
         self._load_balancing_policy = TokenAwarePolicy(self._policy)
         self._execution_profile = ExecutionProfile(load_balancing_policy=self._load_balancing_policy,
                                                    request_timeout=client_timeout,
-                                                   retry_policy=RetryPolicy())
+                                                   retry_policy=ORMRetryPolicy(attempts),
+                                                   consistency_level=consistency_level,
+                                                   speculative_execution_policy=self._speculative_execution_policy
+                                                   )
         self._connection_config = connection_config
         self._attempts = attempts
         self._table_config: Optional[List[TableConfig]] = None
@@ -153,7 +183,6 @@ class ORMInstance(IDatabaseService):
                                                                       max_attempts=self._attempts)
                 )
                 self.session = self.cluster.connect()
-                self._semaphore = threading.Semaphore(self._get_number_of_requests())
                 self._scan_tables()
                 self.log.info(f"Connected to {self._connection_config.credential.hosts}")
                 return
@@ -320,11 +349,7 @@ class ORMInstance(IDatabaseService):
             return self._execute_async_query(prepared_statement, values)
         self._execute_query(prepared_statement, values)
 
-    def release_semaphore(self):
-        self._semaphore.release()
-
     def _execute_async_query(self, statement: PreparedStatement, values: List[Any]) -> ResponseFuture:
-        self._semaphore.acquire()
         statement.is_idempotent = True
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
         try:
@@ -387,8 +412,3 @@ class ORMInstance(IDatabaseService):
         values = _generate_pre_statement_labels(columns)
         statement = f"delete from {keyspace}.{table_name} where {' and '.join(values.values())}"
         self._prepared_statements[hashed_name] = self.session.prepare(statement)
-
-    def _get_number_of_requests(self) -> int:
-        request_per_connection = self.cluster.get_max_requests_per_connection(host_distance=HostDistance.LOCAL)
-        max_connections = self.cluster.get_core_connections_per_host(host_distance=HostDistance.LOCAL)
-        return request_per_connection * max_connections * 0.95
