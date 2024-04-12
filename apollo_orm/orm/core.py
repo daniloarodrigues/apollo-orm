@@ -120,18 +120,18 @@ class ORMRetryPolicy(RetryPolicy):
         if retry_num < self.MAX_RETRY_ATTEMPTS and (
                 (write_type == "BATCH_LOG" and received_responses >= required_responses) or (
                 write_type != "BATCH_LOG" and received_responses > 0)):
-            return self.RETRY
-        return self.RETHROW
+            return self.RETRY, consistency
+        return self.RETHROW, None
 
     def on_unavailable(self, query, consistency, required_replicas, alive_replicas, retry_num):
         if retry_num < self.MAX_RETRY_ATTEMPTS and alive_replicas < required_replicas:
-            return self.RETRY
-        return self.RETHROW
+            return self.RETRY, consistency
+        return self.RETHROW, None
 
     def on_request_error(self, query, consistency, error, retry_num):
         if retry_num < self.MAX_RETRY_ATTEMPTS:
-            return self.RETRY
-        return self.RETHROW
+            return self.RETRY, consistency
+        return self.RETHROW, None
 
 
 def get_consistency_level(consistency: str) -> int:
