@@ -183,29 +183,27 @@ class ORMInstance(IDatabaseService):
                 protocol_version: int = 4) -> None:
         if self._connection_config is None:
             raise ApolloORMException("Connection config is not set")
-        error_message = ""
-        for _ in range(self._attempts):
-            try:
-                auth_provider = PlainTextAuthProvider(
-                    username=self._connection_config.credential.user,
-                    password=self._connection_config.credential.password
-                )
-                self.cluster = Cluster(
-                    contact_points=self._connection_config.credential.hosts,
-                    port=self._connection_config.credential.port,
-                    auth_provider=auth_provider,
-                    protocol_version=protocol_version,
-                    execution_profiles={EXEC_PROFILE_DEFAULT: self._execution_profile},
-                    reconnection_policy=ExponentialReconnectionPolicy(base_delay=1.0, max_delay=60.0,
-                                                                      max_attempts=self._attempts)
-                )
-                self.session = self.cluster.connect()
-                self._scan_tables()
-                self.log.info(f"Connected to {self._connection_config.credential.hosts}")
-                return
-            except ConnectionException as e:
-                error_message = str(e) if str(e) else "Unknown error"
-        raise ApolloORMException(f"Failed to connect after {self._attempts} attempts - {error_message}")
+        try:
+            auth_provider = PlainTextAuthProvider(
+                username=self._connection_config.credential.user,
+                password=self._connection_config.credential.password
+            )
+            self.cluster = Cluster(
+                contact_points=self._connection_config.credential.hosts,
+                port=self._connection_config.credential.port,
+                auth_provider=auth_provider,
+                protocol_version=protocol_version,
+                execution_profiles={EXEC_PROFILE_DEFAULT: self._execution_profile},
+                reconnection_policy=ExponentialReconnectionPolicy(base_delay=1.0, max_delay=10.0,
+                                                                  max_attempts=self._attempts)
+            )
+            self.session = self.cluster.connect()
+            self._scan_tables()
+            self.log.info(f"Connected to {self._connection_config.credential.hosts}")
+            return
+        except Exception as e:
+            error_message = str(e) if str(e) else "Unknown error"
+            raise ApolloORMException(f"Failed to connect after {self._attempts} attempts - {error_message}")
 
     def close(self):
         if self.session is not None:
@@ -265,7 +263,7 @@ class ORMInstance(IDatabaseService):
         if pendent_columns:
             raise ApolloORMException(
                 f"""Column {pendent_columns} is not in the filtered columns.
-                All partition keys columns must be passed as parameter""".rstrip())
+                    All partition keys columns must be passed as parameter""".rstrip())
 
     def _check_clustering_columns(self, columns: Dict[str, Column], table_name: str) -> None:
         non_regular_columns = self._table_config[self._connection_config.tables.index(table_name)].columns
@@ -275,7 +273,7 @@ class ORMInstance(IDatabaseService):
         if pendent_columns:
             raise ApolloORMException(
                 f"""Column {pendent_columns} is not in the filtered columns.
-                All clustering columns must be passed as parameter""".rstrip())
+                    All clustering columns must be passed as parameter""".rstrip())
 
     def select_from_json(self, json_input: str, table_name: str) -> ResultSet:
         return self.select(json.loads(json_input), table_name)
@@ -290,7 +288,7 @@ class ORMInstance(IDatabaseService):
             return self._execute_query(prepared_statement, values)
         except Exception as e:
             self.log.error(f"Failed to select data: {e}, in table {table_name}")
-            raise ApolloORMException(e)
+            raise ApolloORMException(f"Failed to select data: {dictionary_input} in table {table_name} - {e}")
 
     def insert(self, dictionary_input: Dict[str, Any], table_name: str, exec_async: bool = False) \
             -> Optional[ResponseFuture]:
@@ -302,7 +300,7 @@ class ORMInstance(IDatabaseService):
             self._bind_delete_or_insert(filtered_columns, prepared_statement)
         except Exception as e:
             self.log.error(f"Failed to insert data: {dictionary_input}, in table {table_name}")
-            raise e
+            raise ApolloORMException(f"Failed to insert data: {dictionary_input} in table {table_name} - {e}")
 
     def delete(self, dictionary_input: Dict[str, Any], table_name: str, exec_async: bool = False) \
             -> Optional[ResponseFuture]:
@@ -314,27 +312,9 @@ class ORMInstance(IDatabaseService):
             self._bind_delete_or_insert(filtered_columns, prepared_statement)
         except Exception as e:
             self.log.error(f"Failed to delete data: {e}, in table {table_name}")
-            raise e
+            raise ApolloORMException(f"Failed to delete data: {dictionary_input} in table {table_name} - {e}")
 
-    def pre_process_insert(self, list_of_dict: List[Dict[str, Any]], table_name: str) -> PreProcessedInsertData:
-        statements_and_params = {}
-        errors: Optional[List[ResultProcess]] = []
-        for dictionary_input in list_of_dict:
-            try:
-                filtered_columns = self._filter_columns(dictionary_input, table_name, "insert")
-                prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "insert")
-                if prepared_statement not in statements_and_params:
-                    statements_and_params[prepared_statement] = []
-                values = [filtered_columns[column.hash_id].value for column in
-                          sorted(filtered_columns.values(), key=lambda x: x.name)]
-                statements_and_params[prepared_statement].append(tuple(values))
-            except Exception as e:
-                errors.append(ResultProcess(str(e), None, dictionary_input))
-                self.log.error(f"Failed to pre process data: {e}, in table {table_name}")
-        return PreProcessedInsertData(statements_and_params, errors)
-
-    def insert_concurrent(self, pre_processed_insert: PreProcessedInsertData, workers: int = 10,
-                          retry: int = 3) -> ResultList:
+    def insert_concurrent(self, pre_processed_insert: PreProcessedInsertData, workers: int = 10) -> ResultList:
         errors: List[ResultProcess] = []
         successful: List[ResultProcess] = []
         if pre_processed_insert.errors:
@@ -349,12 +329,9 @@ class ORMInstance(IDatabaseService):
                     else:
                         successful.append(
                             ResultProcess("Data inserted successfully", statement.query_string, values))
-            except (NoHostAvailable, ConnectionException) as e:
+            except Exception as e:
                 self.log.error("Connection error: {e}")
-                if retry == 0:
-                    raise ApolloORMException(f"Failed to insert data: {statement} - {values} - Error Message: {e}")
-                self.reconnect()
-                self.insert_concurrent(pre_processed_insert, workers, retry - 1)
+                raise ApolloORMException(f"Failed to insert data: {statement} - {values} - Error Message: {e}")
         return ResultList(successful, errors)
 
     def _bind_delete_or_insert(self, filtered_columns: Dict[str, Column],
@@ -383,10 +360,9 @@ class ORMInstance(IDatabaseService):
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
         try:
             return self.session.execute(statement, values)
-        except (NoHostAvailable, ConnectionException) as e:
+        except Exception as e:
             self.log.error(f"Connection error: {e}")
-            self.reconnect()
-            return self.session.execute(statement, values)
+            raise ApolloORMException(f"Failed to execute query: {statement.query_string, values} - {e}")
 
     def _prepare_dynamic_statement(self, columns: Dict[str, Column], table_name: str,
                                    query_type: str) -> PreparedStatement:
@@ -401,31 +377,46 @@ class ORMInstance(IDatabaseService):
                     self._prepare_insert(hashed_name, ordered_columns, keyspace, table_name, columns)
                 elif query_type == "delete":
                     self._prepare_delete(hashed_name, ordered_columns, keyspace, table_name, columns)
-            except (NoHostAvailable, ConnectionException) as e:
-                self.log.error(f"Connection error: {e}")
-                self.reconnect()
-                self._prepare_dynamic_statement(columns, table_name, query_type)
+            except Exception as e:
+                self.log.error(f"Failed to prepare statement: {e}")
+                raise ApolloORMException(f"Failed to prepare statement: {columns} - {e}")
         return self._prepared_statements[hashed_name]
 
     def _prepare_read(self, hashed_name: str, columns: List[Column], keyspace: str, table_name: str) -> None:
-        values = _generate_pre_statement_labels(columns)
-        statement = f"select * from {keyspace}.{table_name} where {' and '.join(values.values())}"
-        self._prepared_statements[hashed_name] = self.session.prepare(statement)
+        try:
+            values = _generate_pre_statement_labels(columns)
+            statement = f"select * from {keyspace}.{table_name} where {' and '.join(values.values())}"
+            self._prepare_statement(hashed_name, statement)
+        except Exception as e:
+            self.log.error(f"Failed to prepare read statement: {e}")
+            raise ApolloORMException(f"Failed to prepare read statement: {columns} - {e}")
 
     def _prepare_insert(self, hashed_name: str, columns: List[Column], keyspace: str, table_name: str,
                         dict_columns: Optional[Dict[str, Column]] = None) -> None:
         hashed_statement = {}
-        keys = [column.name for column in columns]
-        for column in columns:
-            hashed_statement[column.hash_id] = "?"
-        statement = f"""insert into
-            {keyspace}.{table_name}
-            ({', '.join(keys)})
-            values ({', '.join(hashed_statement.values())})"""
-        self._prepared_statements[hashed_name] = self.session.prepare(statement)
+        try:
+            keys = [column.name for column in columns]
+            for column in columns:
+                hashed_statement[column.hash_id] = "?"
+            statement = f"""insert into
+                    {keyspace}.{table_name}
+                    ({', '.join(keys)})
+                    values ({', '.join(hashed_statement.values())})"""
+            self._prepare_statement(hashed_name, statement)
+        except Exception as e:
+            self.log.error(f"Failed to prepare insert statement: {e}")
+            raise ApolloORMException(f"Failed to prepare insert statement: {columns} - {e}")
 
     def _prepare_delete(self, hashed_name: str, columns: List[Column], keyspace: str, table_name: str,
                         dict_columns: Optional[Dict[str, Column]] = None) -> None:
-        values = _generate_pre_statement_labels(columns)
-        statement = f"delete from {keyspace}.{table_name} where {' and '.join(values.values())}"
+        try:
+            values = _generate_pre_statement_labels(columns)
+            statement = f"delete from {keyspace}.{table_name} where {' and '.join(values.values())}"
+            self._prepare_statement(hashed_name, statement)
+        except Exception as e:
+            self.log.error(f"Failed to prepare delete statement: {e}")
+            raise ApolloORMException(f"Failed to prepare delete statement: {columns} - {e}")
+
+    def _prepare_statement(self, hashed_name: str, statement: str) -> None:
         self._prepared_statements[hashed_name] = self.session.prepare(statement)
+        self._prepared_statements[hashed_name].is_idempotent = True
