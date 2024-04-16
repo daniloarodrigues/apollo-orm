@@ -124,14 +124,10 @@ class ORMRetryPolicy(RetryPolicy):
         return self.RETHROW, None
 
     def on_unavailable(self, query, consistency, required_replicas, alive_replicas, retry_num):
-        if retry_num < self.MAX_RETRY_ATTEMPTS and alive_replicas < required_replicas:
-            return self.RETRY, consistency
-        return self.RETHROW, None
+        return (self.RETRY_NEXT_HOST, None) if retry_num == 0 else (self.RETHROW, None)
 
     def on_request_error(self, query, consistency, error, retry_num):
-        if retry_num < self.MAX_RETRY_ATTEMPTS:
-            return self.RETRY, consistency
-        return self.RETHROW, None
+        return self.RETRY_NEXT_HOST, None
 
 
 def get_consistency_level(consistency: str) -> int:
@@ -194,8 +190,7 @@ class ORMInstance(IDatabaseService):
                 auth_provider=auth_provider,
                 protocol_version=protocol_version,
                 execution_profiles={EXEC_PROFILE_DEFAULT: self._execution_profile},
-                reconnection_policy=ExponentialReconnectionPolicy(base_delay=1.0, max_delay=10.0,
-                                                                  max_attempts=self._attempts)
+                reconnection_policy=ExponentialReconnectionPolicy(base_delay=1.0, max_delay=10.0)
             )
             self.session = self.cluster.connect()
             self._scan_tables()
