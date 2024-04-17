@@ -159,8 +159,8 @@ class ORMInstance(IDatabaseService):
                  ):
         self._attempts = attempts
         self._idle_heartbeat_interval = idle_heartbeat_interval
-        # self._speculative_execution_policy = ConstantSpeculativeExecutionPolicy(
-        #     delay=0.1, max_attempts=attempts)
+        self._speculative_execution_policy = ConstantSpeculativeExecutionPolicy(
+            delay=0.1, max_attempts=attempts)
         self._policy = DCAwareRoundRobinPolicy(
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
         self._load_balancing_policy = TokenAwarePolicy(self._policy)
@@ -168,7 +168,7 @@ class ORMInstance(IDatabaseService):
                                                    request_timeout=client_timeout,
                                                    consistency_level=get_consistency_level(consistency_level),
                                                    retry_policy=ORMRetryPolicy(attempts),
-                                                   # speculative_execution_policy=self._speculative_execution_policy
+                                                   speculative_execution_policy=self._speculative_execution_policy
                                                    )
         self._connection_config = connection_config
         self._table_config: Optional[List[TableConfig]] = None
