@@ -154,11 +154,13 @@ class ORMInstance(IDatabaseService):
                  connection_config: ConnectionConfig,
                  attempts: int = 5,
                  consistency_level: str = "LOCAL_ONE",
-                 client_timeout: int = 20.0
+                 client_timeout: int = 30.0,
+                 idle_heartbeat_interval: int = 30
                  ):
         self._attempts = attempts
-        self._speculative_execution_policy = ConstantSpeculativeExecutionPolicy(
-            delay=0.1, max_attempts=attempts)
+        self._idle_heartbeat_interval = idle_heartbeat_interval
+        # self._speculative_execution_policy = ConstantSpeculativeExecutionPolicy(
+        #     delay=0.1, max_attempts=attempts)
         self._policy = DCAwareRoundRobinPolicy(
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
         self._load_balancing_policy = TokenAwarePolicy(self._policy)
@@ -166,7 +168,7 @@ class ORMInstance(IDatabaseService):
                                                    request_timeout=client_timeout,
                                                    consistency_level=get_consistency_level(consistency_level),
                                                    retry_policy=ORMRetryPolicy(attempts),
-                                                   speculative_execution_policy=self._speculative_execution_policy
+                                                   # speculative_execution_policy=self._speculative_execution_policy
                                                    )
         self._connection_config = connection_config
         self._table_config: Optional[List[TableConfig]] = None
@@ -189,8 +191,9 @@ class ORMInstance(IDatabaseService):
                 port=self._connection_config.credential.port,
                 auth_provider=auth_provider,
                 protocol_version=protocol_version,
+                idle_heartbeat_interval=self._idle_heartbeat_interval,
                 execution_profiles={EXEC_PROFILE_DEFAULT: self._execution_profile},
-                reconnection_policy=ExponentialReconnectionPolicy(base_delay=1.0, max_delay=10.0)
+                reconnection_policy=ExponentialReconnectionPolicy(base_delay=1.0, max_delay=10.0, max_attempts=None)
             )
             self.session = self.cluster.connect()
             self._scan_tables()
