@@ -154,10 +154,11 @@ class ORMInstance(IDatabaseService):
                  connection_config: ConnectionConfig,
                  attempts: int = 5,
                  consistency_level: str = "LOCAL_ONE",
-                 client_timeout: int = 30.0,
+                 client_timeout: int = 20,
                  idle_heartbeat_interval: int = 30
                  ):
         self._attempts = attempts
+        self._connect_timeout = client_timeout
         self._idle_heartbeat_interval = idle_heartbeat_interval
         self._speculative_execution_policy = ConstantSpeculativeExecutionPolicy(
             delay=0.1, max_attempts=attempts)
@@ -167,7 +168,7 @@ class ORMInstance(IDatabaseService):
         self._execution_profile = ExecutionProfile(load_balancing_policy=self._load_balancing_policy,
                                                    request_timeout=client_timeout,
                                                    consistency_level=get_consistency_level(consistency_level),
-                                                   retry_policy=ORMRetryPolicy(attempts),
+                                                   retry_policy=RetryPolicy(),
                                                    speculative_execution_policy=self._speculative_execution_policy
                                                    )
         self._connection_config = connection_config
@@ -189,13 +190,14 @@ class ORMInstance(IDatabaseService):
             self.cluster = Cluster(
                 contact_points=self._connection_config.credential.hosts,
                 port=self._connection_config.credential.port,
+                connect_timeout=self._connect_timeout,
                 auth_provider=auth_provider,
                 protocol_version=protocol_version,
                 idle_heartbeat_interval=self._idle_heartbeat_interval,
                 execution_profiles={EXEC_PROFILE_DEFAULT: self._execution_profile},
                 reconnection_policy=ExponentialReconnectionPolicy(base_delay=1.0, max_delay=10.0, max_attempts=None)
             )
-            self.session = self.cluster.connect()
+            self.session = self.cluster.connect(self._connection_config.credential.keyspace_name)
             self._scan_tables()
             self.log.info(f"Connected to {self._connection_config.credential.hosts}")
             return
@@ -312,6 +314,23 @@ class ORMInstance(IDatabaseService):
             self.log.error(f"Failed to delete data: {e}, in table {table_name}")
             raise ApolloORMException(f"Failed to delete data: {dictionary_input} in table {table_name} - {e}")
 
+    def pre_process_insert(self, list_of_dict: List[Dict[str, Any]], table_name: str) -> PreProcessedInsertData:
+        statements_and_params = {}
+        errors: Optional[List[ResultProcess]] = []
+        for dictionary_input in list_of_dict:
+            try:
+                filtered_columns = self._filter_columns(dictionary_input, table_name, "insert")
+                prepared_statement = self._prepare_dynamic_statement(filtered_columns, table_name, "insert")
+                if prepared_statement not in statements_and_params:
+                    statements_and_params[prepared_statement] = []
+                values = [filtered_columns[column.hash_id].value for column in
+                          sorted(filtered_columns.values(), key=lambda x: x.name)]
+                statements_and_params[prepared_statement].append(tuple(values))
+            except Exception as e:
+                errors.append(ResultProcess(str(e), None, dictionary_input))
+                self.log.error(f"Failed to pre process data: {e}, in table {table_name}")
+        return PreProcessedInsertData(statements_and_params, errors)
+
     def insert_concurrent(self, pre_processed_insert: PreProcessedInsertData, workers: int = 10) -> ResultList:
         errors: List[ResultProcess] = []
         successful: List[ResultProcess] = []
@@ -345,7 +364,7 @@ class ORMInstance(IDatabaseService):
         statement.is_idempotent = True
         self.log.info(f"Executing query: {statement.query_string} with values: {values}")
         try:
-            return self.session.execute_async(statement, values)
+            return self.session.execute_async(statement, values, )
         except (NoHostAvailable, ConnectionException) as e:
             self.log.error(f"Connection error: {e}. Reconnecting...")
             self.reconnect()
