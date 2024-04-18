@@ -12,7 +12,7 @@ from cassandra.cluster import Cluster, Session, ExecutionProfile, ResultSet, Res
     EXEC_PROFILE_DEFAULT
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, RetryPolicy, \
-    ExponentialReconnectionPolicy, ConstantSpeculativeExecutionPolicy
+    ExponentialReconnectionPolicy
 from cassandra.query import PreparedStatement
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
@@ -159,16 +159,13 @@ class ORMInstance(IDatabaseService):
         self._attempts = attempts
         self._connect_timeout = client_timeout
         self._idle_heartbeat_interval = idle_heartbeat_interval
-        # self._speculative_execution_policy = ConstantSpeculativeExecutionPolicy(
-        #     delay=0.1, max_attempts=attempts)
         self._policy = DCAwareRoundRobinPolicy(
             connection_config.credential.datacenter) if connection_config.credential.datacenter else RoundRobinPolicy()
         self._load_balancing_policy = TokenAwarePolicy(self._policy)
         self._execution_profile = ExecutionProfile(load_balancing_policy=self._load_balancing_policy,
                                                    request_timeout=client_timeout,
                                                    consistency_level=get_consistency_level(consistency_level),
-                                                   retry_policy=RetryPolicy(),
-                                                   # speculative_execution_policy=self._speculative_execution_policy
+                                                   retry_policy=RetryPolicy()
                                                    )
         self._connection_config = connection_config
         self._table_config: Optional[List[TableConfig]] = None
