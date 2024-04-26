@@ -199,7 +199,7 @@ class ORMInstance(IDatabaseService):
             )
             self.session = self.cluster.connect(self._connection_config.credential.keyspace_name)
             self._scan_tables()
-            self.log.info(f"Connected to {self._connection_config.credential.hosts}")
+            self.log.debug(f"Connected to {self._connection_config.credential.hosts}")
             return
         except Exception as e:
             error_message = str(e) if str(e) else "Unknown error"
@@ -362,7 +362,7 @@ class ORMInstance(IDatabaseService):
 
     def _execute_async_query(self, statement: PreparedStatement, values: List[Any]) -> ResponseFuture:
         statement.is_idempotent = True
-        self.log.info(f"Executing query: {statement.query_string} with values: {values}")
+        self.log.debug(f"Executing query: {statement.query_string} with values: {values}")
         try:
             return self.session.execute_async(statement, values, )
         except Exception as e:
@@ -370,7 +370,7 @@ class ORMInstance(IDatabaseService):
             raise ApolloORMException(f"Failed to execute query: {statement.query_string, values} - {e}")
 
     def _execute_query(self, statement: PreparedStatement, values: List[Any]) -> ResultSet:
-        self.log.info(f"Executing query: {statement.query_string} with values: {values}")
+        self.log.debug(f"Executing query: {statement.query_string} with values: {values}")
         try:
             return self.session.execute(statement, values)
         except Exception as e:
