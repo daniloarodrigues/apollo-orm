@@ -14,6 +14,7 @@ from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.policies import RoundRobinPolicy, DCAwareRoundRobinPolicy, TokenAwarePolicy, RetryPolicy, \
     ExponentialReconnectionPolicy
 from cassandra.query import PreparedStatement
+from cassandra.io.twistedreactor import TwistedConnection
 from apollo_orm.domains.models.entities.column.entity import Column
 from apollo_orm.domains.models.entities.concurrent.pre_processed_insert.entity import PreProcessedInsertData
 from apollo_orm.domains.models.entities.concurrent.result_list.entity import ResultList
@@ -154,9 +155,11 @@ class ORMInstance(IDatabaseService):
                  attempts: int = 5,
                  consistency_level: str = "LOCAL_ONE",
                  client_timeout: int = 20,
-                 idle_heartbeat_interval: int = 30
+                 idle_heartbeat_interval: int = 30,
+                 aws_lambda: bool = False
                  ):
         self._attempts = attempts
+        self._aws_lambda = aws_lambda
         self._connect_timeout = client_timeout
         self._idle_heartbeat_interval = idle_heartbeat_interval
         self._policy = DCAwareRoundRobinPolicy(
@@ -188,6 +191,7 @@ class ORMInstance(IDatabaseService):
                 port=self._connection_config.credential.port,
                 connect_timeout=self._connect_timeout,
                 auth_provider=auth_provider,
+                connection_class=TwistedConnection if self._aws_lambda else None,
                 protocol_version=protocol_version,
                 idle_heartbeat_interval=self._idle_heartbeat_interval,
                 execution_profiles={EXEC_PROFILE_DEFAULT: self._execution_profile},
