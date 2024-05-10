@@ -153,7 +153,7 @@ class ORMInstance(IDatabaseService):
     def __init__(self,
                  connection_config: ConnectionConfig,
                  attempts: int = 5,
-                 consistency_level: str = "LOCAL_ONE",
+                 consistency_level: Optional[str] = None,
                  client_timeout: int = 20,
                  idle_heartbeat_interval: int = 30,
                  aws_lambda: bool = False
@@ -167,7 +167,8 @@ class ORMInstance(IDatabaseService):
         self._load_balancing_policy = TokenAwarePolicy(self._policy)
         self._execution_profile = ExecutionProfile(load_balancing_policy=self._load_balancing_policy,
                                                    request_timeout=client_timeout,
-                                                   consistency_level=get_consistency_level(consistency_level),
+                                                   consistency_level=get_consistency_level(
+                                                       consistency_level or "LOCAL_QUORUM"),
                                                    retry_policy=RetryPolicy()
                                                    )
         self._connection_config = connection_config
